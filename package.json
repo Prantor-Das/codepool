@@ -17,7 +17,8 @@
     "db:init": "prisma db init",
     "db:migrate": "prisma db migrate",
     "db:status": "prisma migration status",
-    "db:setup": "bun run db:generate && bun run db:migrate"
+    "db:setup": "bun run db:generate && bun run db:migrate",
+    "verify:graph": "bun scripts/verify-graph-setup.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.69",
@@ -40,6 +41,7 @@
     "kysely": "^0.29.5",
     "localtunnel": "^2.0.2",
     "lucide-react": "^1.44.0",
+    "neo4j-driver": "^6.2.0",
     "next": "16.3.4",
     "next-themes": "^0.4.6",
     "octokit": "^5.0.5",
