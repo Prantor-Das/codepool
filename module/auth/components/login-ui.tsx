@@ -54,7 +54,7 @@ const LoginUI = () => {
       return;
     }
 
-    router.push("/dashboard");
+    router.replace("/dashboard");
   };
 
   return (

@@ -5,6 +5,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import Link from "next/link";
 
 const stats = [
   {
@@ -63,12 +64,12 @@ export default function DashboardPage() {
               Add your first GitHub repository from the Repository section.
             </p>
           </div>
-          <a
+          <Link
             href="/dashboard/repository"
             className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline"
           >
             Go to repositories <ArrowUpRight className="size-4" />
-          </a>
+          </Link>
         </CardContent>
       </Card>
     </div>

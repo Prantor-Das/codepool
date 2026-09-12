@@ -9,10 +9,10 @@ import { Separator } from "@/components/ui/separator";
 import { requireAuth } from "@/module/auth/utils/auth-utils";
 
 const DashBoardLayout = async ({ children }: LayoutProp) => {
-  await requireAuth();
+  const session = await requireAuth();
   return (
     <SidebarProvider>
-      <AppSidebar />
+      <AppSidebar user={session.user} />
       <SidebarInset>
         <header className="flex h-16 shrink-0 items-center gap-2 border-b bg-background/80 px-4 backdrop-blur">
           <SidebarTrigger className="-ml-1" aria-label="Toggle navigation" />

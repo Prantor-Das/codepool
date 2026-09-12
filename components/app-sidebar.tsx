@@ -1,9 +1,8 @@
 "use client";
 
-import { Moon, Sun, LogOut } from "lucide-react";
+import { Moon, Sun } from "lucide-react";
 
 import { useTheme } from "next-themes";
-import { useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
 
 import {
@@ -20,27 +19,22 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 import Link from "next/link";
 
-// import Logout from "@/modules/auth/components/logout"
-import { useSession } from "@/lib/auth-client";
 import Logout from "@/module/auth/components/logout";
 import { navigationItems } from "@/lib/types";
 
-const AppSidebar = () => {
+type SidebarUser = {
+  name: string;
+  email: string;
+  image: string | null;
+};
+
+const AppSidebar = ({ user }: { user: SidebarUser }) => {
   const { theme, setTheme } = useTheme();
   const pathname = usePathname();
-  const { data: session } = useSession();
-  const mounted = useSyncExternalStore(
-    () => () => undefined,
-    () => true,
-    () => false,
-  );
 
   const isActive = (url: string) =>
     pathname === url || pathname.startsWith(url + "/");
 
-  if (!mounted || !session) return null;
-
-  const user = session.user;
   const username = user.name || "GUEST";
   const email = user.email || "";
   const initials = username
@@ -112,7 +106,6 @@ const AppSidebar = () => {
           </button>
 
           <Logout>
-            <LogOut className="h-4 w-4" />
             Logout
           </Logout>
         </div>

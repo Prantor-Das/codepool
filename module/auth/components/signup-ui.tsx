@@ -55,7 +55,7 @@ export default function SignupUI() {
       return;
     }
 
-    router.push("/dashboard");
+    router.replace("/dashboard");
   };
 
   const handleGithubSignup = async () => {
