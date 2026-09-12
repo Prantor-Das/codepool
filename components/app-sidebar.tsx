@@ -1,5 +1,6 @@
 "use client";
 
+import { useSyncExternalStore } from "react";
 import { Moon, Sun } from "lucide-react";
 
 import { useTheme } from "next-themes";
@@ -25,12 +26,17 @@ import { navigationItems } from "@/lib/types";
 type SidebarUser = {
   name: string;
   email: string;
-  image: string | null;
+  image?: string | null;
 };
 
 const AppSidebar = ({ user }: { user: SidebarUser }) => {
   const { theme, setTheme } = useTheme();
   const pathname = usePathname();
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
 
   const isActive = (url: string) =>
     pathname === url || pathname.startsWith(url + "/");
@@ -97,17 +103,16 @@ const AppSidebar = ({ user }: { user: SidebarUser }) => {
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
             className="flex items-center gap-2 text-sm"
           >
-            {theme === "dark" ? (
-              <Sun className="h-4 w-4" />
-            ) : (
-              <Moon className="h-4 w-4" />
-            )}
+            {mounted &&
+              (theme === "dark" ? (
+                <Sun className="h-4 w-4" />
+              ) : (
+                <Moon className="h-4 w-4" />
+              ))}
             Switch Theme
           </button>
 
-          <Logout>
-            Logout
-          </Logout>
+          <Logout>Logout</Logout>
         </div>
       </SidebarFooter>
     </Sidebar>

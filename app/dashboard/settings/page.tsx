@@ -1,25 +1,20 @@
-import { Settings } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
+import { ProfileForm } from "@/module/settings/components/profile-form";
+import { RepositoryList } from "@/module/settings/components/repository-list";
+import { requireAuth } from "@/module/auth/utils/auth-utils";
 
-export default function SettingsPage() {
+export default async function SettingsPage() {
+  await requireAuth();
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-8">
+    <div className="mx-auto w-full max-w-6xl space-y-6">
       <div>
         <p className="text-sm font-medium text-primary">Workspace</p>
         <h2 className="mt-1 text-3xl font-semibold tracking-tight">Settings</h2>
         <p className="mt-2 text-muted-foreground">
-          Configure your Codepool workspace.
+          Manage your Codepool account and connected repositories.
         </p>
       </div>
-      <Card>
-        <CardContent className="flex flex-col items-center justify-center p-12 text-center">
-          <Settings className="mb-4 size-10 text-muted-foreground" />
-          <h3 className="font-semibold">Settings are coming soon</h3>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Workspace preferences will be available here.
-          </p>
-        </CardContent>
-      </Card>
+      <ProfileForm />
+      <RepositoryList />
     </div>
   );
 }

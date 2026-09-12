@@ -11,6 +11,10 @@ export function Providers({ children }: { children: ReactNode }) {
       defaultTheme="system"
       enableSystem
       disableTransitionOnChange
+      scriptProps={{
+        type:
+          typeof window === "undefined" ? "text/javascript" : "text/plain",
+      }}
     >
       <QueryProvider>{children}</QueryProvider>
     </ThemeProvider>
