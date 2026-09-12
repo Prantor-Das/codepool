@@ -102,6 +102,7 @@ export const pollRepositories = inngest.createFunction(
         await inngest.send({
           name: "pr.review.requested",
           data: {
+            repositoryId: repository.id,
             owner: repository.owner,
             repo: repository.name,
             prNumber: pullRequest.number,

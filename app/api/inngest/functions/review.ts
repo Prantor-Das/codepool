@@ -17,7 +17,37 @@ export const generateReview = inngest.createFunction(
   // jbnj
 
   async ({ event, step }) => {
-    const { owner, repo, prNumber, userId } = event.data;
+    const { owner, repo, prNumber, userId, repositoryId } = event.data;
+
+    const reviewUrl = `https://github.com/${owner}/${repo}/pull/${prNumber}`;
+    const reviewRecordId = await step.run("initialize-review", async () => {
+      const existing = await prisma.orm.public.Review.where({
+        repositoryId,
+        prNumber,
+      }).first();
+
+      if (existing) {
+        await prisma.orm.public.Review.where({ id: existing.id }).update({
+          prTitle: "Review in progress…",
+          prUrl: reviewUrl,
+          review: "",
+          status: "pending",
+        });
+        return existing.id;
+      }
+
+      const created = await prisma.orm.public.Review.create({
+        repositoryId,
+        prNumber,
+        prTitle: "Review in progress…",
+        prUrl: reviewUrl,
+        review: "",
+        status: "pending",
+      });
+      return created.id;
+    });
+
+    try {
 
     const { diff, title, description, token } = await step.run(
       "fetch-pr-data",
@@ -85,37 +115,31 @@ Format your response in markdown.`;
     });
 
     await step.run("save-review", async () => {
-      const repository = await prisma.orm.public.Repository.where({
-        owner,
-        name: repo,
-      }).first();
-
-      if (!repository) {
-        throw new Error("Repository not found");
-      }
-
-      // Optional: prevent duplicate saves
       const existing = await prisma.orm.public.Review.where({
-        repositoryId: repository.id,
-        prNumber,
+        id: reviewRecordId,
       }).first();
+      if (!existing) throw new Error("Review record was not initialized");
 
-      if (existing) {
-        return { alreadySaved: true };
-      }
-
-      await prisma.orm.public.Review.create({
-        repositoryId: repository.id,
+      await prisma.orm.public.Review.where({ id: reviewRecordId }).update({
         prNumber,
         prTitle: title,
-        prUrl: `https://github.com/${owner}/${repo}/pull/${prNumber}`,
+        prUrl: reviewUrl,
         review,
         status: "completed",
       });
 
-      return { saved: true }; // SMALL output only
+      return { saved: true };
     });
 
     return { success: true };
+    } catch (error) {
+      if (reviewRecordId) {
+        await prisma.orm.public.Review.where({ id: reviewRecordId }).update({
+          status: "failed",
+          review: error instanceof Error ? error.message : "Unknown error",
+        });
+      }
+      throw error;
+    }
   },
 );

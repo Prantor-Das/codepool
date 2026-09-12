@@ -32,8 +32,12 @@ export async function getDashboardStats() {
     const repositoryIds = new Set(
       userRepositories.map((repository) => repository.id),
     );
-    const allReviews =
-      await prisma.orm.public.Review.select("repositoryId").all();
+    // Dashboard review totals represent successful reviews, not pending or failed attempts.
+    const allReviews = await prisma.orm.public.Review.where({
+      status: "completed",
+    })
+      .select("repositoryId")
+      .all();
     const totalRepos = userRepositories.length;
     const totalReviews = allReviews.filter((review) =>
       repositoryIds.has(review.repositoryId),
@@ -137,10 +141,12 @@ export async function getMonthlyActivity() {
     const repositoryIds = new Set(
       userRepositories.map((repository) => repository.id),
     );
-    const reviews = await prisma.orm.public.Review.select(
-      "repositoryId",
-      "createdAt",
-    ).all();
+    // Keep the monthly chart consistent with the headline total: completed reviews only.
+    const reviews = await prisma.orm.public.Review.where({
+      status: "completed",
+    })
+      .select("repositoryId", "createdAt")
+      .all();
     reviews.forEach((review) => {
       if (!repositoryIds.has(review.repositoryId)) return;
       const key =

@@ -73,6 +73,13 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
   },
+  account: {
+    accountLinking: {
+      // This app does not currently provide email verification for password
+      // accounts. GitHub's verified email claim is still required by Better Auth.
+      requireLocalEmailVerified: false,
+    },
+  },
   socialProviders: {
     github: {
       clientId: process.env.GITHUB_CLIENT_ID!,
