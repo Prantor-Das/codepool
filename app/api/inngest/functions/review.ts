@@ -3,7 +3,7 @@ import {
   postReviewComment,
   updateReviewCheckRun,
 } from "@/module/github/lib/github";
-import { retrieveContext } from "@/module/ai/lib/rag";
+import { buildRegressionJudgeContext } from "@/module/regression/judge";
 import { generateReview as generateModelReview, reviewOutputToMarkdown } from "@/lib/modelscope";
 import { prisma } from "@/src/prisma/db";
 import { inngest } from "@/inngest/client";
@@ -87,11 +87,9 @@ export const generateReview = inngest.createFunction(
       },
     );
 
-      const context = await step.run("retrieve-context", async () => {
-        const query = `${title}\n${description}`;
-
-        return await retrieveContext(query, `${owner}/${repo}`);
-      });
+      const context = await step.run("build-regression-judge-context", () =>
+        buildRegressionJudgeContext({ repositoryId, repoSlug: `${owner}/${repo}`, title, description, diff }),
+      );
 
       const review = await step.run("generate-ai-review", async () => {
         const prompt = `You are a senior engineer reviewing a pull request. Produce a concise, high-signal review that is useful to the author and safe to act on.
@@ -101,8 +99,10 @@ Review only behavior supported by the supplied diff and repository context. Do n
 PR title: ${title}
 PR description: ${description || "No description provided"}
 
-Relevant repository context:
-${context.join("\n\n") || "No additional context was retrieved."}
+Regression Judge context (structured graph, historical failures, and semantic matches):
+${JSON.stringify(context, null, 2)}
+
+Risk routing: ${context.riskTier}. A sandbox-diff-engine tier is a regression-risk signal; do not claim a runtime failure without evidence in the diff/context.
 
 Pull request diff:
 \`\`\`diff

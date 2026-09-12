@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { Node, Project, ScriptKind, type SourceFile } from "ts-morph";
+import { Node, Project, ScriptKind } from "ts-morph";
 
 export type ExtractedSymbolKind = "function" | "class" | "method" | "import" | "export";
 
@@ -38,7 +38,7 @@ function lineRange(node: Node) {
   return { startLine: node.getStartLineNumber(), endLine: node.getEndLineNumber() };
 }
 
-function callableDetails(node: Node, sourceFile: SourceFile) {
+function callableDetails(node: Node) {
   const calls = new Set<string>();
   const reads = new Set<string>();
   const writes = new Set<string>();
@@ -74,14 +74,13 @@ function toSymbol(
   name: string,
   kind: ExtractedSymbolKind,
   filePath: string,
-  sourceFile: SourceFile,
   imports: string[],
   exports: string[],
 ): ExtractedSymbol {
   const range = lineRange(node);
   return {
     name, kind, filePath, signature: node.getText().split("{")[0].trim(), ...range,
-    ...callableDetails(node, sourceFile), imports, exports, route: inferredRoute(name, filePath), contentHash: hashNode(node),
+    ...callableDetails(node), imports, exports, route: inferredRoute(name, filePath), contentHash: hashNode(node),
   };
 }
 
@@ -97,28 +96,28 @@ export function extractSymbols(filePath: string, content: string): ExtractedSymb
 
   for (const declaration of sourceFile.getImportDeclarations()) {
     const names = [declaration.getDefaultImport()?.getText(), ...declaration.getNamedImports().map((entry) => entry.getName())].filter(Boolean).join(", ");
-    result.push(toSymbol(declaration, names || declaration.getModuleSpecifierValue(), "import", filePath, sourceFile, imports, exports));
+    result.push(toSymbol(declaration, names || declaration.getModuleSpecifierValue(), "import", filePath, imports, exports));
   }
   for (const declaration of sourceFile.getExportDeclarations()) {
-    result.push(toSymbol(declaration, declaration.getModuleSpecifierValue() ?? "export", "export", filePath, sourceFile, imports, exports));
+    result.push(toSymbol(declaration, declaration.getModuleSpecifierValue() ?? "export", "export", filePath, imports, exports));
   }
   for (const declaration of sourceFile.getFunctions()) {
     const name = declaration.getName();
-    if (name) result.push(toSymbol(declaration, name, "function", filePath, sourceFile, imports, exports));
+    if (name) result.push(toSymbol(declaration, name, "function", filePath, imports, exports));
   }
   for (const declaration of sourceFile.getClasses()) {
     const className = declaration.getName();
     if (!className) continue;
-    result.push(toSymbol(declaration, className, "class", filePath, sourceFile, imports, exports));
+    result.push(toSymbol(declaration, className, "class", filePath, imports, exports));
     for (const method of declaration.getMethods()) {
-      result.push(toSymbol(method, `${className}.${method.getName()}`, "method", filePath, sourceFile, imports, exports));
+      result.push(toSymbol(method, `${className}.${method.getName()}`, "method", filePath, imports, exports));
     }
   }
   for (const statement of sourceFile.getVariableStatements()) {
     for (const declaration of statement.getDeclarations()) {
       const initializer = declaration.getInitializer();
       if (!initializer || (!Node.isArrowFunction(initializer) && !Node.isFunctionExpression(initializer))) continue;
-      result.push(toSymbol(declaration, declaration.getName(), "function", filePath, sourceFile, imports, exports));
+      result.push(toSymbol(declaration, declaration.getName(), "function", filePath, imports, exports));
     }
   }
   return result;

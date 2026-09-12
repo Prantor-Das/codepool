@@ -65,6 +65,22 @@ export async function ingestExtractedCommit(repositoryId: string, input: CommitI
     },
   );
 
+  // Resolve relative module imports after every batch. This is intentionally
+  // bounded to repository-local files; package imports have no Symbol target.
+  await runQuery(
+    `MATCH (source:Symbol {repositoryId: $repositoryId})
+     UNWIND source.imports AS modulePath
+     MATCH (target:Symbol {repositoryId: $repositoryId})
+     WHERE modulePath STARTS WITH "." AND target.filePath IN [
+       replace(modulePath, "./", "") + ".ts",
+       replace(modulePath, "./", "") + ".tsx",
+       replace(modulePath, "./", "") + "/index.ts"
+     ]
+     MERGE (source)-[imports:IMPORTS]->(target)
+     SET imports.sourceType = $astSource, imports.confidence = $confidence`,
+    { repositoryId, astSource: AST.sourceType, confidence: AST.confidence },
+  ).catch(() => undefined);
+
   if (input.pullRequest) {
     const prId = `${repositoryId}:pr:${input.pullRequest.number}`;
     await runQuery(
