@@ -19,7 +19,8 @@
     "db:status": "prisma migration status",
     "db:setup": "bun run db:generate && bun run db:migrate",
     "verify:graph": "bun scripts/verify-graph-setup.ts",
-    "verify:ingestion": "bun scripts/verify-ingestion.ts"
+    "verify:ingestion": "bun scripts/verify-ingestion.ts",
+    "verify:antibodies": "bun scripts/verify-antibodies.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.69",
