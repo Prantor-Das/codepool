@@ -3,8 +3,7 @@ import {
   postReviewComment,
 } from "@/module/github/lib/github";
 import { retrieveContext } from "@/module/ai/lib/rag";
-import { generateText } from "ai";
-import { google } from "@ai-sdk/google";
+import { generateReviewText } from "@/lib/modelscope";
 import { prisma } from "@/src/prisma/db";
 import { inngest } from "@/inngest/client";
 
@@ -101,12 +100,7 @@ Please provide:
 
 Format your response in markdown.`;
 
-        const { text } = await generateText({
-          model: google("gemini-2.5-flash"),
-          prompt,
-        });
-
-        return text;
+        return await generateReviewText(prompt);
       });
 
       await step.run("post-comment", async () => {

@@ -21,11 +21,6 @@ export const navigationItems = [
     icon: BookOpen,
   },
   {
-    title: "Subscription",
-    url: "/dashboard/subscription",
-    icon: BookOpen,
-  },
-  {
     title: "Settings",
     url: "/dashboard/settings",
     icon: Settings,
