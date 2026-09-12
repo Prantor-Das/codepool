@@ -6,6 +6,21 @@ import { retrieveContext } from "@/module/ai/lib/rag";
 import { generateReviewText } from "@/lib/modelscope";
 import { prisma } from "@/src/prisma/db";
 import { inngest } from "@/inngest/client";
+import { NonRetriableError } from "inngest";
+
+function isPermanentModelScopeAuthError(error: unknown) {
+  const candidate = error as { status?: number; cause?: unknown } | undefined;
+  const message = error instanceof Error ? error.message : String(error);
+  const causeMessage =
+    candidate?.cause instanceof Error ? candidate.cause.message : "";
+
+  return (
+    candidate?.status === 401 ||
+    /(?:^|\D)401(?:\D|$)|authentication failed|valid ModelScope token/i.test(
+      `${message} ${causeMessage}`,
+    )
+  );
+}
 
 export const generateReview = inngest.createFunction(
   {
@@ -126,14 +141,26 @@ Format your response in markdown.`;
 
       return { success: true };
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
       try {
         await prisma.orm.public.Review.where({ id: reviewRecordId }).update({
           status: "failed",
-          review: error instanceof Error ? error.message : "Unknown error",
+          review: message,
         });
       } catch (updateError) {
         console.error("Failed to mark review as failed:", updateError);
       }
+
+      if (isPermanentModelScopeAuthError(error)) {
+        console.error(
+          "Review stopped without retry: ModelScope authentication failed. Replace MODELSCOPE_ACCESS_TOKEN/MODELSCOPE_API_KEY.",
+        );
+        throw new NonRetriableError(
+          `Review stopped without retry: ${message}`,
+          { cause: error },
+        );
+      }
+
       throw error;
     }
   },

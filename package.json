@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "next dev",
     "dev:tunnel": "node start-tunnel.mjs",
-    "inngest:dev": "bunx inngest-cli@latest dev -u http://localhost:3000/api/inngest",
+    "inngest:dev": "node start-inngest.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",

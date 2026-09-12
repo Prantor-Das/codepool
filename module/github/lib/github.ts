@@ -216,8 +216,9 @@ export const deleteWebhook = async (owner: string, repo: string) => {
     return false;
   }
 };
-const MAX_REPOSITORY_FILES = 300;
-const MAX_REPOSITORY_BYTES = 5 * 1024 * 1024;
+const MAX_REPOSITORY_FILES = 1000;
+const MAX_REPOSITORY_BYTES = 20 * 1024 * 1024;
+const MAX_FILE_BYTES = 512 * 1024;
 const IGNORED_DIRECTORY_NAMES = new Set([".git", "node_modules", "dist"]);
 const LOCKFILE_NAMES = new Set([
   "package-lock.json",
@@ -274,6 +275,61 @@ const BINARY_EXTENSIONS = new Set([
   "xz",
   "zip",
 ]);
+const IMPORTANT_FILE_NAMES = new Set([
+  "dockerfile",
+  "makefile",
+  "readme",
+  "readme.md",
+  "license",
+  "tsconfig.json",
+  "next.config.js",
+  "next.config.mjs",
+  "next.config.ts",
+  "vite.config.js",
+  "vite.config.ts",
+]);
+const IMPORTANT_SOURCE_EXTENSIONS = new Set([
+  "astro",
+  "c",
+  "cc",
+  "cpp",
+  "cs",
+  "css",
+  "dart",
+  "go",
+  "graphql",
+  "gql",
+  "h",
+  "hpp",
+  "html",
+  "java",
+  "js",
+  "jsx",
+  "json",
+  "kt",
+  "kts",
+  "less",
+  "md",
+  "mdx",
+  "mjs",
+  "mts",
+  "php",
+  "prisma",
+  "py",
+  "rb",
+  "rs",
+  "scss",
+  "sql",
+  "svelte",
+  "swift",
+  "toml",
+  "ts",
+  "tsx",
+  "vue",
+  "xml",
+  "yaml",
+  "yml",
+]);
 
 function shouldSkipRepositoryPath(filePath: string) {
   const segments = filePath.split("/").filter(Boolean);
@@ -286,6 +342,17 @@ function shouldSkipRepositoryPath(filePath: string) {
     ) ||
     LOCKFILE_NAMES.has(fileName) ||
     BINARY_EXTENSIONS.has(extension)
+  );
+}
+
+function isImportantRepositoryPath(filePath: string) {
+  if (shouldSkipRepositoryPath(filePath)) return false;
+
+  const fileName = filePath.split("/").at(-1)?.toLowerCase() ?? "";
+  const extension = fileName.split(".").at(-1) ?? "";
+  return (
+    IMPORTANT_FILE_NAMES.has(fileName) ||
+    IMPORTANT_SOURCE_EXTENSIONS.has(extension)
   );
 }
 
@@ -317,13 +384,16 @@ export async function getRepoFileContents(
       if (
         data.type !== "file" ||
         !data.content ||
-        shouldSkipRepositoryPath(data.path)
+        !isImportantRepositoryPath(data.path)
       ) {
         return;
       }
 
       const contentBuffer = Buffer.from(data.content, "base64");
-      if (totalBytes + contentBuffer.byteLength > MAX_REPOSITORY_BYTES) {
+      if (
+        contentBuffer.byteLength > MAX_FILE_BYTES ||
+        totalBytes + contentBuffer.byteLength > MAX_REPOSITORY_BYTES
+      ) {
         return;
       }
 
@@ -342,7 +412,12 @@ export async function getRepoFileContents(
       ) {
         break;
       }
-      if (shouldSkipRepositoryPath(item.path)) continue;
+      if (!isImportantRepositoryPath(item.path)) {
+        // Directories are allowed through so their children can be inspected.
+        if (item.type !== "dir" || shouldSkipRepositoryPath(item.path)) {
+          continue;
+        }
+      }
 
       if (item.type === "dir") {
         await walk(item.path);
@@ -354,9 +429,10 @@ export async function getRepoFileContents(
       // file that would exceed the remaining budget.
       if (
         typeof item.size === "number" &&
-        totalBytes + item.size > MAX_REPOSITORY_BYTES
+        (item.size > MAX_FILE_BYTES ||
+          totalBytes + item.size > MAX_REPOSITORY_BYTES)
       ) {
-        break;
+        continue;
       }
 
       await walk(item.path);

@@ -147,8 +147,10 @@ export default function RepositoryPage() {
                         {
                           onSuccess: (result) =>
                             setConnectedName(
-                              result.webhookCreated
+                              result.webhookCreated && result.queued
                                 ? `${repo.name} connected successfully. Indexing will begin shortly.`
+                                : result.webhookCreated
+                                  ? `${repo.name} connected, but indexing could not be queued. Start the Inngest dev server and try again.`
                                 : `${repo.name} connected. Webhooks are disabled for localhost; use a public URL to enable automatic reviews.`,
                             ),
                           onSettled: () => setConnectingId(null),

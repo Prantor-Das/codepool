@@ -1,55 +1,82 @@
 import { getPineconeIndex } from "@/lib/pinecone";
-import { embed } from "ai";
-import { google } from "@ai-sdk/google";
 
-export async function generateEmbedding(text: string) {
-  const { embedding } = await embed({
-    model: google.textEmbeddingModel("text-embedding-004"),
-    value: text,
-  });
+const PINECONE_TEXT_FIELD = process.env.PINECONE_TEXT_FIELD ?? "text";
+const EMBEDDING_BATCH_SIZE = 64;
+const EMBEDDING_PARALLEL_BATCHES = 3;
+const MAX_EMBEDDING_CHARS = 8000;
 
-  return embedding;
+type RepositoryFile = { path: string; content: string };
+
+function toIntegratedRecord(repoId: string, file: RepositoryFile) {
+  const content = `File: ${file.path}\n\n${file.content}`.slice(
+    0,
+    MAX_EMBEDDING_CHARS,
+  );
+
+  return {
+    _id: `${repoId}-${file.path.replace(/\//g, "_")}`,
+    [PINECONE_TEXT_FIELD]: content,
+    repoId,
+    path: file.path,
+  };
 }
 
 export async function indexCodeBase(
   repoId: string,
-  files: { path: string; content: string }[],
+  files: RepositoryFile[],
 ) {
-  const vectors = [];
+  const batches: RepositoryFile[][] = [];
 
-  for (const file of files) {
-    const content = `File: ${file.path}\n\n${file.content}`;
-
-    const truncatedContent = content.slice(0, 8000);
-
-    try {
-      const embedding = await generateEmbedding(truncatedContent);
-
-      vectors.push({
-        id: `${repoId}-${file.path.replace(/\//g, "_")}`,
-        values: embedding,
-        metadata: {
-          repoId,
-          path: file.path,
-          content: truncatedContent,
-        },
-      });
-    } catch (error) {
-      console.error(`Failed to embed file: ${file.path}`, error);
-    }
+  for (let i = 0; i < files.length; i += EMBEDDING_BATCH_SIZE) {
+    batches.push(files.slice(i, i + EMBEDDING_BATCH_SIZE));
   }
 
-  if (vectors.length > 0) {
-    const batchsize = 100;
+  let nextBatch = 0;
+  let indexedFiles = 0;
+  let failedFiles = 0;
+  let lastError: unknown;
 
-    for (let i = 0; i < vectors.length; i += batchsize) {
-      const batch = vectors.slice(i, i + batchsize);
+  const worker = async () => {
+    while (true) {
+      const batchFiles = batches[nextBatch++];
+      if (!batchFiles) return;
 
-      await getPineconeIndex().upsert({ records: batch });
+      try {
+        await getPineconeIndex().upsertRecords({
+          records: batchFiles.map((file) => toIntegratedRecord(repoId, file)),
+        });
+        indexedFiles += batchFiles.length;
+      } catch (error) {
+        failedFiles += batchFiles.length;
+        lastError = error;
+        console.error(
+          `Failed to index batch (${batchFiles[0].path} to ${batchFiles.at(-1)?.path}):`,
+          error,
+        );
+      }
     }
+  };
+
+  if (batches.length > 0) {
+    await Promise.all(
+      Array.from(
+        { length: Math.min(EMBEDDING_PARALLEL_BATCHES, batches.length) },
+        worker,
+      ),
+    );
   }
 
-  console.log("Indexing complete");
+  if (files.length > 0 && indexedFiles === 0) {
+    const message =
+      lastError instanceof Error ? lastError.message : "Unknown Pinecone error";
+    throw new Error(`Repository indexing failed: ${message}`);
+  }
+
+  console.log(
+    `Indexing complete: ${indexedFiles} indexed, ${failedFiles} failed`,
+  );
+
+  return { indexedFiles, failedFiles };
 }
 
 export async function retrieveContext(
@@ -57,16 +84,19 @@ export async function retrieveContext(
   repoId: string,
   topK: number = 5,
 ) {
-  const embedding = await generateEmbedding(query);
-
-  const results = await getPineconeIndex().query({
-    vector: embedding,
-    filter: { repoId },
-    topK,
-    includeMetadata: true,
+  const results = await getPineconeIndex().searchRecords({
+    query: {
+      inputs: { text: query },
+      filter: { repoId },
+      topK,
+    },
+    fields: [PINECONE_TEXT_FIELD, "repoId", "path"],
   });
 
-  return results.matches
-    .map((match) => match.metadata?.content as string)
-    .filter(Boolean);
+  return results.result.hits
+    .map((hit) => {
+      const fields = hit.fields as Record<string, unknown>;
+      return fields[PINECONE_TEXT_FIELD] as string | undefined;
+    })
+    .filter((content): content is string => Boolean(content));
 }

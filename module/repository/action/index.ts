@@ -50,7 +50,15 @@ export async function connectedRepo(
         "This repository is already connected to another account.",
       );
     }
-    return { connected: true, queued: false };
+
+    // Reconcile the webhook on reconnect. This is important for localtunnel,
+    // whose public URL can change between development sessions.
+    const webhook = await createWebhook(owner, repo);
+    return {
+      connected: true,
+      queued: false,
+      webhookCreated: Boolean(webhook),
+    };
   }
 
   const connectedRepositories = await prisma.orm.public.Repository.where({

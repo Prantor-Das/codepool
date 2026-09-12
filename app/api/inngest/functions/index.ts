@@ -9,6 +9,7 @@ type ConnectedRepository = {
 
 type OpenPullRequest = {
   number: number;
+  updated_at: string;
 };
 import { prisma } from "@/src/prisma/db";
 import { indexCodeBase } from "@/module/ai/lib/rag";
@@ -34,7 +35,7 @@ export const indexRepo = inngest.createFunction(
     const { owner, repo, userId } = event.data;
     // fetch all the files
 
-    const files = await step.run("fetch-files", async () => {
+    const indexingResult = await step.run("fetch-and-index-codebase", async () => {
       const account = await prisma.orm.public.Account.where({
         userId,
         providerId: "github",
@@ -44,21 +45,25 @@ export const indexRepo = inngest.createFunction(
         throw new Error("No github acces token found");
       }
 
-      return await getRepoFileContents(account.accessToken, owner, repo);
+      const files = await getRepoFileContents(account.accessToken, owner, repo);
+      const result = await indexCodeBase(`${owner}/${repo}`, files);
+
+      return result;
     });
 
-    await step.run("index-codebase", async () => {
-      await indexCodeBase(`${owner}/${repo}`, files);
-    });
-
-    return { success: true, indexedFiles: files.length };
+    return {
+      success: true,
+      indexedFiles: indexingResult.indexedFiles,
+      failedFiles: indexingResult.failedFiles,
+    };
   },
 );
 
 export const pollRepositories = inngest.createFunction(
   {
     id: "poll-repositories-for-reviews",
-    triggers: [{ cron: "*/5 * * * *" }],
+    // Webhooks are the primary trigger; this catches missed deliveries.
+    triggers: [{ cron: "*/2 * * * *" }],
   },
   async ({ step }) => {
     const repositories = (await step.run("load-connected-repositories", () =>
@@ -93,11 +98,27 @@ export const pollRepositories = inngest.createFunction(
       )) as unknown as OpenPullRequest[];
 
       for (const pullRequest of pullRequests) {
-        const existingReview = await prisma.orm.public.Review.where({
+        const existingReviews = await prisma.orm.public.Review.where({
           repositoryId: repository.id,
           prNumber: pullRequest.number,
-        }).first();
-        if (existingReview) continue;
+        })
+          .select("status", "updatedAt")
+          .all();
+        const latestReview = existingReviews
+          .slice()
+          .sort(
+            (left, right) =>
+              right.updatedAt.epochMilliseconds - left.updatedAt.epochMilliseconds,
+          )[0];
+
+        // Re-queue the same PR when GitHub reports a newer commit/update.
+        if (
+          latestReview &&
+          latestReview.updatedAt.epochMilliseconds >=
+            new Date(pullRequest.updated_at).getTime()
+        ) {
+          continue;
+        }
 
         await inngest.send({
           name: "pr.review.requested",

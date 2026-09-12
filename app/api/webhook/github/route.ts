@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { reviewPullRequest } from "@/module/ai/action";
+import { inngest } from "@/inngest/client";
 import { prisma } from "@/src/prisma/db";
 import { NextResponse, NextRequest } from "next/server";
 
@@ -50,12 +50,17 @@ export async function POST(req: NextRequest) {
 
     const body = JSON.parse(rawBody.toString("utf8"));
     const event = req.headers.get("x-github-event");
-    console.log(`Recived Github event: ${event}`);
+    console.log(
+      `[github-webhook] received event=${event} delivery=${deliveryId}`,
+    );
 
     try {
       await prisma.orm.public.WebhookDelivery.create({ deliveryId });
     } catch (error) {
       if (isUniqueConstraintError(error)) {
+        console.log(
+          `[github-webhook] duplicate delivery=${deliveryId}; skipping`,
+        );
         return NextResponse.json(
           { message: "Duplicate delivery" },
           { status: 200 },
@@ -75,16 +80,49 @@ export async function POST(req: NextRequest) {
 
       const [owner, repoName] = repo.split("/");
 
-      if (action === "opened" || action === "synchronize") {
-        reviewPullRequest(owner, repoName, prNumber)
-          .then(() => console.log(`Review completed for ${repo} #${prNumber}`))
-          .catch((error) =>
-            console.error(`Review failed for ${repo} #${prNumber}:`, error),
-          );
+      if (
+        action === "opened" ||
+        action === "synchronize" ||
+        action === "reopened" ||
+        action === "ready_for_review"
+      ) {
+        const repository = await prisma.orm.public.Repository.where({
+          owner,
+          name: repoName,
+        }).first();
+
+        if (!repository) {
+          throw new Error(`Repository is not connected: ${repo}`);
+        }
+
+        // Send directly from the authenticated webhook. Do not route this
+        // through a server action or preflight GitHub request: the webhook
+        // must complete the Inngest handoff before returning 200.
+        await inngest.send({
+          name: "pr.review.requested",
+          data: {
+            repositoryId: repository.id,
+            owner,
+            repo: repoName,
+            prNumber,
+            userId: repository.userId,
+          },
+        });
+
+        console.log(
+          `[github-webhook] queued pr.review.requested repo=${repo} pr=${prNumber} delivery=${deliveryId}`,
+        );
+      } else {
+        console.log(
+          `[github-webhook] ignored pull_request action=${action} repo=${repo} pr=${prNumber}`,
+        );
       }
     }
 
-    return NextResponse.json({ message: "Event Processes" }, { status: 200 });
+    return NextResponse.json(
+      { message: "Event processed", deliveryId },
+      { status: 200 },
+    );
   } catch (error) {
     console.error("Error processing webhook:", error);
     return NextResponse.json(

@@ -2,7 +2,6 @@
 
 import { inngest } from "@/inngest/client";
 import { prisma } from "@/src/prisma/db";
-import { getPullRequestDiff } from "@/module/github/lib/github";
 
 const MAX_PENDING_REVIEWS_PER_USER = 5;
 
@@ -53,12 +52,9 @@ export async function reviewPullRequest(
       throw new Error("GitHub access token missing");
     }
 
-    const token = githubAccount.accessToken;
-
-    // Fetch PR metadata (used for validation / future UI)
-    await getPullRequestDiff(token, owner, repo, prNumber);
-
-    // Send async job to Inngest
+    // Queue first. The Inngest worker fetches the diff and records any
+    // GitHub/API failure on the Review row. Fetching the diff here as a
+    // preflight could prevent the event from ever reaching Inngest.
     await inngest.send({
       name: "pr.review.requested",
       data: {
@@ -75,6 +71,13 @@ export async function reviewPullRequest(
       message: "Review queued",
     };
   } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unknown error occurred";
+    console.error(
+      `Failed to enqueue review for ${owner}/${repo}#${prNumber}:`,
+      error,
+    );
+
     try {
       const repository = await prisma.orm.public.Repository.where({
         owner,
@@ -87,10 +90,7 @@ export async function reviewPullRequest(
           prNumber,
           prTitle: "Failed to fetch PR",
           prUrl: `https://github.com/${owner}/${repo}/pull/${prNumber}`,
-          review:
-            error instanceof Error
-              ? error.message
-              : "Unknown error occurred while fetching PR",
+          review: message,
           status: "failed",
         });
       }
@@ -100,7 +100,7 @@ export async function reviewPullRequest(
 
     return {
       success: false,
-      message: "Failed to queue review",
+      message,
     };
   }
 }
