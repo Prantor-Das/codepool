@@ -1,0 +1,284 @@
+[
+  {
+    "id": "table.repository",
+    "label": "Create table \"repository\"",
+    "summary": "Creates table \"repository\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "table",
+        "name": "repository"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure table \"repository\" does not exist",
+        "sql": "SELECT (to_regclass($1)) IS NULL AS \"result\"",
+        "params": [
+          "\"public\".\"repository\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create table \"repository\"",
+        "sql": "CREATE TABLE \"public\".\"repository\" (\n  \"createdAt\" timestamptz DEFAULT (now()) NOT NULL,\n  \"fullName\" text NOT NULL,\n  \"githubId\" int8 NOT NULL,\n  \"id\" text NOT NULL,\n  \"name\" text NOT NULL,\n  \"owner\" text NOT NULL,\n  \"updatedAt\" timestamptz NOT NULL,\n  \"url\" text NOT NULL,\n  \"userId\" text NOT NULL,\n  PRIMARY KEY (\"id\")\n)",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify table \"repository\" exists",
+        "sql": "SELECT (to_regclass($1)) IS NOT NULL AS \"result\"",
+        "params": [
+          "\"public\".\"repository\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "table.review",
+    "label": "Create table \"review\"",
+    "summary": "Creates table \"review\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "table",
+        "name": "review"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure table \"review\" does not exist",
+        "sql": "SELECT (to_regclass($1)) IS NULL AS \"result\"",
+        "params": [
+          "\"public\".\"review\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create table \"review\"",
+        "sql": "CREATE TABLE \"public\".\"review\" (\n  \"createdAt\" timestamptz DEFAULT (now()) NOT NULL,\n  \"id\" text NOT NULL,\n  \"prNumber\" int4 NOT NULL,\n  \"prTitle\" text NOT NULL,\n  \"prUrl\" text NOT NULL,\n  \"repositoryId\" text NOT NULL,\n  \"review\" text NOT NULL,\n  \"status\" text DEFAULT 'completed' NOT NULL,\n  \"updatedAt\" timestamptz NOT NULL,\n  PRIMARY KEY (\"id\")\n)",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify table \"review\" exists",
+        "sql": "SELECT (to_regclass($1)) IS NOT NULL AS \"result\"",
+        "params": [
+          "\"public\".\"review\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "unique.repository.repository_githubId_key",
+    "label": "Add unique constraint on \"repository\" (githubId)",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "unique",
+        "name": "repository_githubId_key",
+        "table": "repository"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure constraint \"repository_githubId_key\" does not exist",
+        "sql": "SELECT NOT EXISTS (SELECT 1 AS \"one\" FROM \"pg_constraint\" AS \"c\" INNER JOIN \"pg_namespace\" AS \"n\" ON \"n\".\"oid\" = \"c\".\"connamespace\" WHERE (\"c\".\"conname\" = $1 AND \"n\".\"nspname\" = $2 AND \"c\".\"conrelid\" = to_regclass($3))) AS \"result\"",
+        "params": [
+          "repository_githubId_key",
+          "public",
+          "\"public\".\"repository\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "add unique constraint \"repository_githubId_key\"",
+        "sql": "ALTER TABLE \"public\".\"repository\" ADD CONSTRAINT \"repository_githubId_key\" UNIQUE (\"githubId\")"
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify constraint \"repository_githubId_key\" exists",
+        "sql": "SELECT EXISTS (SELECT 1 AS \"one\" FROM \"pg_constraint\" AS \"c\" INNER JOIN \"pg_namespace\" AS \"n\" ON \"n\".\"oid\" = \"c\".\"connamespace\" WHERE (\"c\".\"conname\" = $1 AND \"n\".\"nspname\" = $2 AND \"c\".\"conrelid\" = to_regclass($3))) AS \"result\"",
+        "params": [
+          "repository_githubId_key",
+          "public",
+          "\"public\".\"repository\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "index.repository.repository_userId_idx_a489d58a",
+    "label": "Create index \"repository_userId_idx_a489d58a\" on \"repository\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "index",
+        "name": "repository_userId_idx_a489d58a",
+        "table": "repository"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure index \"repository_userId_idx_a489d58a\" does not exist",
+        "sql": "SELECT (to_regclass($1)) IS NULL AS \"result\"",
+        "params": [
+          "\"public\".\"repository_userId_idx_a489d58a\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create index \"repository_userId_idx_a489d58a\"",
+        "sql": "CREATE INDEX \"repository_userId_idx_a489d58a\" ON \"public\".\"repository\" (\"userId\")",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify index \"repository_userId_idx_a489d58a\" exists",
+        "sql": "SELECT (to_regclass($1)) IS NOT NULL AS \"result\"",
+        "params": [
+          "\"public\".\"repository_userId_idx_a489d58a\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "index.review.review_repositoryId_idx_dce7a8ba",
+    "label": "Create index \"review_repositoryId_idx_dce7a8ba\" on \"review\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "index",
+        "name": "review_repositoryId_idx_dce7a8ba",
+        "table": "review"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure index \"review_repositoryId_idx_dce7a8ba\" does not exist",
+        "sql": "SELECT (to_regclass($1)) IS NULL AS \"result\"",
+        "params": [
+          "\"public\".\"review_repositoryId_idx_dce7a8ba\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create index \"review_repositoryId_idx_dce7a8ba\"",
+        "sql": "CREATE INDEX \"review_repositoryId_idx_dce7a8ba\" ON \"public\".\"review\" (\"repositoryId\")",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify index \"review_repositoryId_idx_dce7a8ba\" exists",
+        "sql": "SELECT (to_regclass($1)) IS NOT NULL AS \"result\"",
+        "params": [
+          "\"public\".\"review_repositoryId_idx_dce7a8ba\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "foreignKey.repository.repository_userId_fkey",
+    "label": "Add foreign key \"repository_userId_fkey\" on \"repository\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "foreignKey",
+        "name": "repository_userId_fkey",
+        "table": "repository"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure FK \"repository_userId_fkey\" does not exist",
+        "sql": "SELECT NOT EXISTS (SELECT 1 AS \"one\" FROM \"pg_constraint\" AS \"c\" INNER JOIN \"pg_namespace\" AS \"n\" ON \"n\".\"oid\" = \"c\".\"connamespace\" WHERE (\"c\".\"conname\" = $1 AND \"n\".\"nspname\" = $2 AND \"c\".\"conrelid\" = to_regclass($3))) AS \"result\"",
+        "params": [
+          "repository_userId_fkey",
+          "public",
+          "\"public\".\"repository\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "add FK \"repository_userId_fkey\"",
+        "sql": "ALTER TABLE \"public\".\"repository\"\nADD CONSTRAINT \"repository_userId_fkey\"\nFOREIGN KEY (\"userId\")\nREFERENCES \"public\".\"user\" (\"id\")\nON DELETE CASCADE"
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify FK \"repository_userId_fkey\" exists",
+        "sql": "SELECT EXISTS (SELECT 1 AS \"one\" FROM \"pg_constraint\" AS \"c\" INNER JOIN \"pg_namespace\" AS \"n\" ON \"n\".\"oid\" = \"c\".\"connamespace\" WHERE (\"c\".\"conname\" = $1 AND \"n\".\"nspname\" = $2 AND \"c\".\"conrelid\" = to_regclass($3))) AS \"result\"",
+        "params": [
+          "repository_userId_fkey",
+          "public",
+          "\"public\".\"repository\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "foreignKey.review.review_repositoryId_fkey",
+    "label": "Add foreign key \"review_repositoryId_fkey\" on \"review\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "foreignKey",
+        "name": "review_repositoryId_fkey",
+        "table": "review"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure FK \"review_repositoryId_fkey\" does not exist",
+        "sql": "SELECT NOT EXISTS (SELECT 1 AS \"one\" FROM \"pg_constraint\" AS \"c\" INNER JOIN \"pg_namespace\" AS \"n\" ON \"n\".\"oid\" = \"c\".\"connamespace\" WHERE (\"c\".\"conname\" = $1 AND \"n\".\"nspname\" = $2 AND \"c\".\"conrelid\" = to_regclass($3))) AS \"result\"",
+        "params": [
+          "review_repositoryId_fkey",
+          "public",
+          "\"public\".\"review\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "add FK \"review_repositoryId_fkey\"",
+        "sql": "ALTER TABLE \"public\".\"review\"\nADD CONSTRAINT \"review_repositoryId_fkey\"\nFOREIGN KEY (\"repositoryId\")\nREFERENCES \"public\".\"repository\" (\"id\")\nON DELETE CASCADE"
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify FK \"review_repositoryId_fkey\" exists",
+        "sql": "SELECT EXISTS (SELECT 1 AS \"one\" FROM \"pg_constraint\" AS \"c\" INNER JOIN \"pg_namespace\" AS \"n\" ON \"n\".\"oid\" = \"c\".\"connamespace\" WHERE (\"c\".\"conname\" = $1 AND \"n\".\"nspname\" = $2 AND \"c\".\"conrelid\" = to_regclass($3))) AS \"result\"",
+        "params": [
+          "review_repositoryId_fkey",
+          "public",
+          "\"public\".\"review\""
+        ]
+      }
+    ]
+  }
+]

@@ -62,3 +62,40 @@ model Verification {
   @@index([identifier])
   @@map("verification")
 }
+
+model Repository {
+  id        String   @id @default(uuid())
+  githubId  BigInt
+  name      String
+  fullName  String
+  owner     String
+  url       String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt temporal.updatedAt()
+  reviews Review[]
+
+
+  @@index([userId])
+  @@unique([githubId])
+  @@map("repository")
+}
+
+model Review {
+  id           String   @id @default(uuid())
+  repositoryId String
+
+  repository   Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  prNumber     Int
+  prTitle      String
+  prUrl        String
+  review       String
+  status       String   @default("completed") // completed | failed | pending
+  createdAt    DateTime @default(now())
+  updatedAt    temporal.updatedAt()
+
+  @@index([repositoryId])
+  @@map("review")
+}
