@@ -1,9 +1,10 @@
 import {
   getPullRequestDiff,
   postReviewComment,
+  updateReviewCheckRun,
 } from "@/module/github/lib/github";
 import { retrieveContext } from "@/module/ai/lib/rag";
-import { generateReviewText } from "@/lib/modelscope";
+import { generateReview as generateModelReview, reviewOutputToMarkdown } from "@/lib/modelscope";
 import { prisma } from "@/src/prisma/db";
 import { inngest } from "@/inngest/client";
 import { NonRetriableError } from "inngest";
@@ -31,7 +32,7 @@ export const generateReview = inngest.createFunction(
   // jbnj
 
   async ({ event, step }) => {
-    const { owner, repo, prNumber, userId, repositoryId } = event.data;
+    const { owner, repo, prNumber, userId, repositoryId, checkRunId } = event.data;
 
     const reviewUrl = `https://github.com/${owner}/${repo}/pull/${prNumber}`;
     const reviewRecordId = await step.run("initialize-review", async () => {
@@ -44,7 +45,6 @@ export const generateReview = inngest.createFunction(
         await prisma.orm.public.Review.where({ id: existing.id }).update({
           prTitle: "Review in progress…",
           prUrl: reviewUrl,
-          review: "",
           status: "pending",
         });
         return existing.id;
@@ -55,13 +55,16 @@ export const generateReview = inngest.createFunction(
         prNumber,
         prTitle: "Review in progress…",
         prUrl: reviewUrl,
-        review: "",
+          review: JSON.stringify({ kind: "check-run", checkRunId, queuedAt: new Date().toISOString() }),
         status: "pending",
       });
       return created.id;
     });
 
     try {
+      const account = await step.run("load-github-account-for-check", () => prisma.orm.public.Account.where({ userId, providerId: "github" }).first());
+      if (!account?.accessToken) throw new Error("No GitHub access token found");
+      if (typeof checkRunId === "number") await step.run("mark-check-in-progress", () => updateReviewCheckRun(account.accessToken!, owner, repo, checkRunId, "in_progress"));
       const { diff, title, description, token } = await step.run(
       "fetch-pr-data",
       async () => {
@@ -91,35 +94,43 @@ export const generateReview = inngest.createFunction(
       });
 
       const review = await step.run("generate-ai-review", async () => {
-        const prompt = `You are an expert code reviewer. Analyze the following pull request and provide a detailed, constructive code review.
+        const prompt = `You are a senior engineer reviewing a pull request. Produce a concise, high-signal review that is useful to the author and safe to act on.
 
-PR Title: ${title}
-PR Description: ${description || "No description provided"}
+Review only behavior supported by the supplied diff and repository context. Do not invent files, line numbers, APIs, requirements, vulnerabilities, test failures, or runtime behavior. Prefer a small number of specific, important findings over generic advice. Do not report style nits unless they cause a real maintainability, correctness, security, performance, or reliability concern.
 
-Context from Codebase:
-${context.join("\n\n")}
+PR title: ${title}
+PR description: ${description || "No description provided"}
 
-Code Changes:
+Relevant repository context:
+${context.join("\n\n") || "No additional context was retrieved."}
+
+Pull request diff:
 \`\`\`diff
 ${diff}
 \`\`\`
 
-Please provide:
-1. **Walkthrough**: A file-by-file explanation of the changes.
-2. **Sequence Diagram**: A Mermaid JS sequence diagram visualizing the flow of the changes (if applicable). Use \`\`\`mermaid ... \`\`\` block. **IMPORTANT**: Ensure the Mermaid syntax is valid. Do not use special characters (like quotes, braces, parentheses) inside Note text or labels as it breaks rendering. Keep the diagram simple.
-3. **Summary**: Brief overview.
-4. **Strengths**: What's done well.
-5. **Issues**: Bugs, security concerns, code smells.
-6. **Suggestions**: Specific code improvements.
-7. **Poem**: A short, creative poem summarizing the changes at the very end.
+Populate the response schema as follows:
+- walkthrough: Explain the changed behavior by file, including important control or data flow. Keep it factual and brief.
+- summary: State the overall intent and risk level of this change in two or three sentences.
+- strengths: List only concrete, observable positives from the diff. Use an empty array when none are meaningful.
+- issues: Include only actionable defects or material risks. Use severity critical/high/medium/low/info accurately. Leave empty when the change is sound.
+- suggestions: Include lower-risk, actionable improvements that are directly related to the changed code. Do not duplicate issues.
 
-Format your response in markdown.`;
+For every issue and suggestion:
+- file must be an exact path present in the diff; lineStart and lineEnd must identify changed lines, or the closest changed lines that introduce the concern.
+- description must explain the observed problem, consequence, and relevant condition in plain language.
+- fixPrompt must be self-contained and imperative. It must start by naming file:lineStart-lineEnd, state the problem in one sentence, then state the required code change and any validation/test to add. It must be ready to paste into an AI coding agent without this review.
+- If the evidence is insufficient to specify an exact file and line range, omit the finding rather than guessing.
 
-        return await generateReviewText(prompt);
+Return only valid JSON that conforms exactly to the supplied schema. Do not use Markdown, code fences, or prose outside that JSON.`;
+
+        return await generateModelReview(prompt);
       });
 
+      const reviewMarkdown = reviewOutputToMarkdown(review);
+
       await step.run("post-comment", async () => {
-        await postReviewComment(token, owner, repo, prNumber, review);
+        await postReviewComment(token, owner, repo, prNumber, reviewMarkdown);
       });
 
       await step.run("save-review", async () => {
@@ -132,16 +143,18 @@ Format your response in markdown.`;
           prNumber,
           prTitle: title,
           prUrl: reviewUrl,
-          review,
+          review: JSON.stringify(review),
           status: "completed",
         });
 
         return { saved: true };
       });
 
+      if (typeof checkRunId === "number") await step.run("mark-check-completed", () => updateReviewCheckRun(account.accessToken!, owner, repo, checkRunId, "completed", "success", "The AI review was generated successfully."));
+
       return { success: true };
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
+      const message = "Review generation failed. Please retry the pull request review.";
       try {
         await prisma.orm.public.Review.where({ id: reviewRecordId }).update({
           status: "failed",
@@ -150,6 +163,11 @@ Format your response in markdown.`;
       } catch (updateError) {
         console.error("Failed to mark review as failed:", updateError);
       }
+
+      try {
+        const account = await prisma.orm.public.Account.where({ userId, providerId: "github" }).first();
+        if (account?.accessToken && typeof checkRunId === "number") await updateReviewCheckRun(account.accessToken, owner, repo, checkRunId, "completed", "failure", message);
+      } catch (checkError) { console.error("Failed to update review check run:", checkError); }
 
       if (isPermanentModelScopeAuthError(error)) {
         console.error(

@@ -2,6 +2,7 @@ import { Octokit } from "octokit";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/src/prisma/db";
 import { headers } from "next/headers";
+import { reviewCheckRunPayload } from "@/lib/review-check";
 
 export const getGithubToken = async (): Promise<string> => {
   const session = await auth.api.getSession({
@@ -488,4 +489,28 @@ export async function postReviewComment(
     issue_number: prNumber,
     body: `## AI code review\n\n${review}\n\n*Powered by Codepool*`,
   });
+}
+
+export type ReviewCheckRun = { id: number; headSha: string };
+
+export async function createReviewCheckRun(token: string, owner: string, repo: string, headSha: string): Promise<ReviewCheckRun> {
+  const octokit = new Octokit({ auth: token });
+  const externalId = `codepool-review:${owner}/${repo}:${headSha}`;
+  const { data: existing } = await octokit.rest.checks.listForRef({ owner, repo, ref: headSha, per_page: 100 });
+  const prior = existing.check_runs.find((check) => check.external_id === externalId);
+  if (prior) {
+    await octokit.rest.checks.update({ owner, repo, check_run_id: prior.id, ...reviewCheckRunPayload("queued", undefined, "Codepool is waiting for a worker.") });
+    return { id: prior.id, headSha };
+  }
+  const { data } = await octokit.rest.checks.create({
+    owner, repo, head_sha: headSha, name: "Codepool AI Review", status: "queued",
+    external_id: externalId,
+    output: { title: "AI review queued", summary: "Codepool received this pull request and is waiting for a worker." },
+  });
+  return { id: data.id, headSha };
+}
+
+export async function updateReviewCheckRun(token: string, owner: string, repo: string, checkRunId: number, state: "in_progress" | "completed", conclusion?: "success" | "failure" | "timed_out", summary?: string) {
+  const octokit = new Octokit({ auth: token });
+  await octokit.rest.checks.update({ owner, repo, check_run_id: checkRunId, ...reviewCheckRunPayload(state, conclusion, summary) });
 }

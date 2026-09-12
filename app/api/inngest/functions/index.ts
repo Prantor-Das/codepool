@@ -16,6 +16,7 @@ import { indexCodeBase } from "@/module/ai/lib/rag";
 import {
   getOpenPullRequests,
   getRepoFileContents,
+  updateReviewCheckRun,
 } from "@/module/github/lib/github";
 
 export const helloWorld = inngest.createFunction(
@@ -135,5 +136,28 @@ export const pollRepositories = inngest.createFunction(
     }
 
     return { success: true, queued };
+  },
+);
+
+const STALE_REVIEW_MS = 30 * 60 * 1000;
+export const expireStaleReviewChecks = inngest.createFunction(
+  { id: "expire-stale-review-checks", triggers: [{ cron: "*/5 * * * *" }] },
+  async ({ step }) => {
+    const reviews = await step.run("load-pending-reviews", () => prisma.orm.public.Review.where({ status: "pending" }).all()) as unknown as Array<{ id: string; repositoryId: string; review: string }>;
+    let expired = 0;
+    for (const review of reviews) {
+      let marker: { kind?: string; checkRunId?: number; queuedAt?: string } | null = null;
+      try { marker = JSON.parse(review.review); } catch { continue; }
+      if (marker?.kind !== "check-run" || typeof marker.checkRunId !== "number" || !marker.queuedAt || Date.now() - new Date(marker.queuedAt).getTime() < STALE_REVIEW_MS) continue;
+      const repository = await prisma.orm.public.Repository.where({ id: review.repositoryId }).first();
+      const account = repository && await prisma.orm.public.Account.where({ userId: repository.userId, providerId: "github" }).first();
+      if (!repository || !account?.accessToken) continue;
+      await step.run(`mark-stale-check-${review.id}`, async () => {
+        await updateReviewCheckRun(account.accessToken!, repository.owner, repository.name, marker!.checkRunId!, "completed", "timed_out", "Review processing exceeded 30 minutes. Please retry the review.");
+        await prisma.orm.public.Review.where({ id: review.id }).update({ status: "failed", review: "Review processing timed out. Please retry the pull request review." });
+      });
+      expired += 1;
+    }
+    return { expired };
   },
 );

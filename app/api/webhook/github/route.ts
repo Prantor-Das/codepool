@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { inngest } from "@/inngest/client";
 import { prisma } from "@/src/prisma/db";
+import { createReviewCheckRun } from "@/module/github/lib/github";
 import { NextResponse, NextRequest } from "next/server";
 
 function verifySignature(rawBody: Buffer, signature: string | null) {
@@ -31,6 +32,8 @@ function isUniqueConstraintError(error: unknown) {
 }
 
 export async function POST(req: NextRequest) {
+  let deliveryId: string | null = null;
+  let claimedDelivery = false;
   try {
     const rawBody = Buffer.from(await req.arrayBuffer());
     if (!verifySignature(rawBody, req.headers.get("x-hub-signature-256"))) {
@@ -40,7 +43,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const deliveryId = req.headers.get("x-github-delivery");
+    deliveryId = req.headers.get("x-github-delivery");
     if (!deliveryId) {
       return NextResponse.json(
         { error: "Missing GitHub delivery ID" },
@@ -56,6 +59,7 @@ export async function POST(req: NextRequest) {
 
     try {
       await prisma.orm.public.WebhookDelivery.create({ deliveryId });
+      claimedDelivery = true;
     } catch (error) {
       if (isUniqueConstraintError(error)) {
         console.log(
@@ -94,6 +98,18 @@ export async function POST(req: NextRequest) {
         if (!repository) {
           throw new Error(`Repository is not connected: ${repo}`);
         }
+        const account = await prisma.orm.public.Account.where({ userId: repository.userId, providerId: "github" }).first();
+        if (!account?.accessToken) throw new Error("No GitHub access token found for repository owner");
+        const headSha = body.pull_request?.head?.sha;
+        if (typeof headSha !== "string") throw new Error("Pull request head SHA is missing");
+        const checkRun = await createReviewCheckRun(account.accessToken, owner, repoName, headSha);
+        const queuedReview = JSON.stringify({ kind: "check-run", checkRunId: checkRun.id, queuedAt: new Date().toISOString() });
+        const existingReview = await prisma.orm.public.Review.where({ repositoryId: repository.id, prNumber }).first();
+        if (existingReview) {
+          await prisma.orm.public.Review.where({ id: existingReview.id }).update({ prTitle: "Review queued…", prUrl: `https://github.com/${owner}/${repoName}/pull/${prNumber}`, review: queuedReview, status: "pending" });
+        } else {
+          await prisma.orm.public.Review.create({ repositoryId: repository.id, prNumber, prTitle: "Review queued…", prUrl: `https://github.com/${owner}/${repoName}/pull/${prNumber}`, review: queuedReview, status: "pending" });
+        }
 
         // Send directly from the authenticated webhook. Do not route this
         // through a server action or preflight GitHub request: the webhook
@@ -106,6 +122,8 @@ export async function POST(req: NextRequest) {
             repo: repoName,
             prNumber,
             userId: repository.userId,
+            checkRunId: checkRun.id,
+            headSha,
           },
         });
 
@@ -124,6 +142,15 @@ export async function POST(req: NextRequest) {
       { status: 200 },
     );
   } catch (error) {
+    // A delivery is only deduplicated after all durable handoff work succeeds.
+    // Releasing our own claim lets GitHub retry transient database/API failures.
+    if (claimedDelivery && deliveryId) {
+      try {
+        await prisma.orm.public.WebhookDelivery.where({ deliveryId }).delete();
+      } catch (cleanupError) {
+        console.error("Failed to release webhook delivery claim:", cleanupError);
+      }
+    }
     console.error("Error processing webhook:", error);
     return NextResponse.json(
       { error: "Internal Server Error" },

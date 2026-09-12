@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import ReactMarkdown from "react-markdown";
 import { ExternalLink, FileSearch } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -15,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getReviewById, getReviews } from "@/module/reviews/action";
+import { parseReviewOutput, ReviewContent } from "@/module/reviews/components/review-content";
 
 export default function ReviewsPage() {
   const [selectedReviewId, setSelectedReviewId] = useState<string | null>(null);
@@ -120,7 +120,7 @@ export default function ReviewsPage() {
                 </p>
               ) : (
                 <div className="max-w-none space-y-4 text-sm leading-6 [&_a]:text-primary [&_a]:underline [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-xs [&_h1]:text-2xl [&_h1]:font-semibold [&_h2]:mt-6 [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mt-5 [&_h3]:text-lg [&_h3]:font-semibold [&_li]:ml-5 [&_li]:list-disc [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-4 [&_pre]:text-xs [&_strong]:font-semibold [&_ul]:space-y-1">
-                  <ReactMarkdown>{selectedReviewQuery.data.review}</ReactMarkdown>
+                  <ReviewBody value={selectedReviewQuery.data.review} />
                 </div>
               )}
             </>
@@ -129,6 +129,11 @@ export default function ReviewsPage() {
       </Dialog>
     </div>
   );
+}
+
+function ReviewBody({ value }: { value: string }) {
+  const review = parseReviewOutput(value);
+  return review ? <ReviewContent review={review} /> : <pre className="whitespace-pre-wrap">{value}</pre>;
 }
 
 function StatusBadge({ status }: { status: string }) {
