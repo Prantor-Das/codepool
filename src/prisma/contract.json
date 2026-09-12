@@ -27,6 +27,10 @@
     "verification": {
       "model": "Verification",
       "namespace": "public"
+    },
+    "webhook_delivery": {
+      "model": "WebhookDelivery",
+      "namespace": "public"
     }
   },
   "domain": {
@@ -728,6 +732,47 @@
               "namespaceId": "public",
               "table": "verification"
             }
+          },
+          "WebhookDelivery": {
+            "fields": {
+              "createdAt": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/timestamptz-temporal@1",
+                  "kind": "scalar"
+                }
+              },
+              "deliveryId": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              },
+              "id": {
+                "nullable": false,
+                "type": {
+                  "codecId": "pg/text@1",
+                  "kind": "scalar"
+                }
+              }
+            },
+            "relations": {},
+            "storage": {
+              "fields": {
+                "createdAt": {
+                  "column": "createdAt"
+                },
+                "deliveryId": {
+                  "column": "deliveryId"
+                },
+                "id": {
+                  "column": "id"
+                }
+              },
+              "namespaceId": "public",
+              "table": "webhook_delivery"
+            }
           }
         }
       }
@@ -1236,6 +1281,43 @@
                 ]
               },
               "uniques": []
+            },
+            "webhook_delivery": {
+              "columns": {
+                "createdAt": {
+                  "codecId": "pg/timestamptz-temporal@1",
+                  "default": {
+                    "expression": "now()",
+                    "kind": "function"
+                  },
+                  "nativeType": "timestamptz",
+                  "nullable": false
+                },
+                "deliveryId": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
+                  "nullable": false
+                },
+                "id": {
+                  "codecId": "pg/text@1",
+                  "nativeType": "text",
+                  "nullable": false
+                }
+              },
+              "foreignKeys": [],
+              "indexes": [],
+              "primaryKey": {
+                "columns": [
+                  "id"
+                ]
+              },
+              "uniques": [
+                {
+                  "columns": [
+                    "deliveryId"
+                  ]
+                }
+              ]
             }
           }
         },
@@ -1243,10 +1325,10 @@
         "kind": "postgres-schema"
       }
     },
-    "storageHash": "cd266d557bcd75c9575b27b69eb13b25b19688bf9fc47256164e8bbd1e9e7c9e"
+    "storageHash": "ed8602c2406d47c4a9b5caa100f50ba1c3c0a51ceb789be5209ebc48588a68b5"
   },
   "execution": {
-    "executionHash": "39367b533d76a5648585df948ebf37b32e8eb68ef6f727eff414385a85e0f9ea",
+    "executionHash": "86dc5cb36fde1e4f92e4592fb5af3830721f6515da6cce99a3d46b35c0c1abfc",
     "mutations": {
       "defaults": [
         {
@@ -1359,6 +1441,17 @@
             "column": "updatedAt",
             "namespace": "public",
             "table": "verification"
+          }
+        },
+        {
+          "onCreate": {
+            "id": "uuidv4",
+            "kind": "generator"
+          },
+          "ref": {
+            "column": "id",
+            "namespace": "public",
+            "table": "webhook_delivery"
           }
         }
       ]

@@ -99,3 +99,11 @@ model Review {
   @@index([repositoryId])
   @@map("review")
 }
+
+model WebhookDelivery {
+  id         String   @id @default(uuid())
+  deliveryId String   @unique
+  createdAt  DateTime @default(now())
+
+  @@map("webhook_delivery")
+}

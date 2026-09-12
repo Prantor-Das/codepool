@@ -1,0 +1,83 @@
+[
+  {
+    "id": "table.webhook_delivery",
+    "label": "Create table \"webhook_delivery\"",
+    "summary": "Creates table \"webhook_delivery\"",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "table",
+        "name": "webhook_delivery"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure table \"webhook_delivery\" does not exist",
+        "sql": "SELECT (to_regclass($1)) IS NULL AS \"result\"",
+        "params": [
+          "\"public\".\"webhook_delivery\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "create table \"webhook_delivery\"",
+        "sql": "CREATE TABLE \"public\".\"webhook_delivery\" (\n  \"createdAt\" timestamptz DEFAULT (now()) NOT NULL,\n  \"deliveryId\" text NOT NULL,\n  \"id\" text NOT NULL,\n  PRIMARY KEY (\"id\")\n)",
+        "params": []
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify table \"webhook_delivery\" exists",
+        "sql": "SELECT (to_regclass($1)) IS NOT NULL AS \"result\"",
+        "params": [
+          "\"public\".\"webhook_delivery\""
+        ]
+      }
+    ]
+  },
+  {
+    "id": "unique.webhook_delivery.webhook_delivery_deliveryId_key",
+    "label": "Add unique constraint on \"webhook_delivery\" (deliveryId)",
+    "operationClass": "additive",
+    "target": {
+      "id": "postgres",
+      "details": {
+        "schema": "public",
+        "objectType": "unique",
+        "name": "webhook_delivery_deliveryId_key",
+        "table": "webhook_delivery"
+      }
+    },
+    "precheck": [
+      {
+        "description": "ensure constraint \"webhook_delivery_deliveryId_key\" does not exist",
+        "sql": "SELECT NOT EXISTS (SELECT 1 AS \"one\" FROM \"pg_constraint\" AS \"c\" INNER JOIN \"pg_namespace\" AS \"n\" ON \"n\".\"oid\" = \"c\".\"connamespace\" WHERE (\"c\".\"conname\" = $1 AND \"n\".\"nspname\" = $2 AND \"c\".\"conrelid\" = to_regclass($3))) AS \"result\"",
+        "params": [
+          "webhook_delivery_deliveryId_key",
+          "public",
+          "\"public\".\"webhook_delivery\""
+        ]
+      }
+    ],
+    "execute": [
+      {
+        "description": "add unique constraint \"webhook_delivery_deliveryId_key\"",
+        "sql": "ALTER TABLE \"public\".\"webhook_delivery\" ADD CONSTRAINT \"webhook_delivery_deliveryId_key\" UNIQUE (\"deliveryId\")"
+      }
+    ],
+    "postcheck": [
+      {
+        "description": "verify constraint \"webhook_delivery_deliveryId_key\" exists",
+        "sql": "SELECT EXISTS (SELECT 1 AS \"one\" FROM \"pg_constraint\" AS \"c\" INNER JOIN \"pg_namespace\" AS \"n\" ON \"n\".\"oid\" = \"c\".\"connamespace\" WHERE (\"c\".\"conname\" = $1 AND \"n\".\"nspname\" = $2 AND \"c\".\"conrelid\" = to_regclass($3))) AS \"result\"",
+        "params": [
+          "webhook_delivery_deliveryId_key",
+          "public",
+          "\"public\".\"webhook_delivery\""
+        ]
+      }
+    ]
+  }
+]
