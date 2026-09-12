@@ -48,8 +48,7 @@ export const generateReview = inngest.createFunction(
     });
 
     try {
-
-    const { diff, title, description, token } = await step.run(
+      const { diff, title, description, token } = await step.run(
       "fetch-pr-data",
       async () => {
         const account = await prisma.orm.public.Account.where({
@@ -71,14 +70,14 @@ export const generateReview = inngest.createFunction(
       },
     );
 
-    const context = await step.run("retrieve-context", async () => {
-      const query = `${title}\n${description}`;
+      const context = await step.run("retrieve-context", async () => {
+        const query = `${title}\n${description}`;
 
-      return await retrieveContext(query, `${owner}/${repo}`);
-    });
+        return await retrieveContext(query, `${owner}/${repo}`);
+      });
 
-    const review = await step.run("generate-ai-review", async () => {
-      const prompt = `You are an expert code reviewer. Analyze the following pull request and provide a detailed, constructive code review.
+      const review = await step.run("generate-ai-review", async () => {
+        const prompt = `You are an expert code reviewer. Analyze the following pull request and provide a detailed, constructive code review.
 
 PR Title: ${title}
 PR Description: ${description || "No description provided"}
@@ -102,42 +101,44 @@ Please provide:
 
 Format your response in markdown.`;
 
-      const { text } = await generateText({
-        model: google("gemini-2.5-flash"),
-        prompt,
+        const { text } = await generateText({
+          model: google("gemini-2.5-flash"),
+          prompt,
+        });
+
+        return text;
       });
 
-      return text;
-    });
-
-    await step.run("post-comment", async () => {
-      await postReviewComment(token, owner, repo, prNumber, review);
-    });
-
-    await step.run("save-review", async () => {
-      const existing = await prisma.orm.public.Review.where({
-        id: reviewRecordId,
-      }).first();
-      if (!existing) throw new Error("Review record was not initialized");
-
-      await prisma.orm.public.Review.where({ id: reviewRecordId }).update({
-        prNumber,
-        prTitle: title,
-        prUrl: reviewUrl,
-        review,
-        status: "completed",
+      await step.run("post-comment", async () => {
+        await postReviewComment(token, owner, repo, prNumber, review);
       });
 
-      return { saved: true };
-    });
+      await step.run("save-review", async () => {
+        const existing = await prisma.orm.public.Review.where({
+          id: reviewRecordId,
+        }).first();
+        if (!existing) throw new Error("Review record was not initialized");
 
-    return { success: true };
+        await prisma.orm.public.Review.where({ id: reviewRecordId }).update({
+          prNumber,
+          prTitle: title,
+          prUrl: reviewUrl,
+          review,
+          status: "completed",
+        });
+
+        return { saved: true };
+      });
+
+      return { success: true };
     } catch (error) {
-      if (reviewRecordId) {
+      try {
         await prisma.orm.public.Review.where({ id: reviewRecordId }).update({
           status: "failed",
           review: error instanceof Error ? error.message : "Unknown error",
         });
+      } catch (updateError) {
+        console.error("Failed to mark review as failed:", updateError);
       }
       throw error;
     }

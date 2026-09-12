@@ -216,6 +216,79 @@ export const deleteWebhook = async (owner: string, repo: string) => {
     return false;
   }
 };
+const MAX_REPOSITORY_FILES = 300;
+const MAX_REPOSITORY_BYTES = 5 * 1024 * 1024;
+const IGNORED_DIRECTORY_NAMES = new Set([".git", "node_modules", "dist"]);
+const LOCKFILE_NAMES = new Set([
+  "package-lock.json",
+  "bun.lock",
+  "bun.lockb",
+  "yarn.lock",
+  "pnpm-lock.yaml",
+]);
+const BINARY_EXTENSIONS = new Set([
+  "7z",
+  "apk",
+  "avi",
+  "bin",
+  "bz2",
+  "class",
+  "dmg",
+  "dll",
+  "doc",
+  "docx",
+  "eot",
+  "exe",
+  "flac",
+  "gif",
+  "gz",
+  "ico",
+  "ipa",
+  "iso",
+  "jar",
+  "jpeg",
+  "jpg",
+  "mov",
+  "mp3",
+  "mp4",
+  "ogg",
+  "otf",
+  "pdf",
+  "png",
+  "psd",
+  "rar",
+  "so",
+  "svg",
+  "tar",
+  "tgz",
+  "tif",
+  "tiff",
+  "ttf",
+  "wav",
+  "webm",
+  "webp",
+  "woff",
+  "woff2",
+  "xls",
+  "xlsx",
+  "xz",
+  "zip",
+]);
+
+function shouldSkipRepositoryPath(filePath: string) {
+  const segments = filePath.split("/").filter(Boolean);
+  const fileName = segments.at(-1)?.toLowerCase() ?? "";
+  const extension = fileName.split(".").at(-1) ?? "";
+
+  return (
+    segments.some((segment) =>
+      IGNORED_DIRECTORY_NAMES.has(segment.toLowerCase()),
+    ) ||
+    LOCKFILE_NAMES.has(fileName) ||
+    BINARY_EXTENSIONS.has(extension)
+  );
+}
+
 export async function getRepoFileContents(
   token: string,
   owner: string,
@@ -223,57 +296,74 @@ export async function getRepoFileContents(
   path: string = "",
 ): Promise<{ path: string; content: string }[]> {
   const octokit = new Octokit({ auth: token });
+  const files: { path: string; content: string }[] = [];
+  let totalBytes = 0;
 
-  const { data } = await octokit.rest.repos.getContent({
-    owner,
-    repo,
-    path,
-  });
-
-  if (!Array.isArray(data)) {
-    // It's a file
-    if (data.type === "file" && data.content) {
-      return [
-        {
-          path: data.path,
-          content: Buffer.from(data.content, "base64").toString("utf-8"),
-        },
-      ];
+  const walk = async (currentPath: string): Promise<void> => {
+    if (
+      files.length >= MAX_REPOSITORY_FILES ||
+      totalBytes >= MAX_REPOSITORY_BYTES
+    ) {
+      return;
     }
-    return [];
-  }
 
-  let files: { path: string; content: string }[] = [];
+    const { data } = await octokit.rest.repos.getContent({
+      owner,
+      repo,
+      path: currentPath,
+    });
 
-  for (const item of data) {
-    if (item.type === "file") {
-      const { data: fileData } = await octokit.rest.repos.getContent({
-        owner,
-        repo,
-        path: item.path,
-      });
+    if (!Array.isArray(data)) {
       if (
-        !Array.isArray(fileData) &&
-        fileData.type === "file" &&
-        fileData.content
+        data.type !== "file" ||
+        !data.content ||
+        shouldSkipRepositoryPath(data.path)
       ) {
-        // Filter out non-code / binary files
-        if (
-          !fileData.path.match(/\.(png|jpg|jpeg|gif|svg|ico|pdf|zip|tar|gz)$/i)
-        ) {
-          files.push({
-            path: fileData.path,
-            content: Buffer.from(fileData.content, "base64").toString("utf-8"),
-          });
-        }
+        return;
       }
-    } else if (item.type === "dir") {
-      const subfiles = await getRepoFileContents(token, owner, repo, item.path);
 
-      files = files.concat(subfiles);
+      const contentBuffer = Buffer.from(data.content, "base64");
+      if (totalBytes + contentBuffer.byteLength > MAX_REPOSITORY_BYTES) {
+        return;
+      }
+
+      files.push({
+        path: data.path,
+        content: contentBuffer.toString("utf-8"),
+      });
+      totalBytes += contentBuffer.byteLength;
+      return;
     }
-  }
 
+    for (const item of data) {
+      if (
+        files.length >= MAX_REPOSITORY_FILES ||
+        totalBytes >= MAX_REPOSITORY_BYTES
+      ) {
+        break;
+      }
+      if (shouldSkipRepositoryPath(item.path)) continue;
+
+      if (item.type === "dir") {
+        await walk(item.path);
+        continue;
+      }
+      if (item.type !== "file") continue;
+
+      // GitHub includes the size in directory listings, so avoid fetching a
+      // file that would exceed the remaining budget.
+      if (
+        typeof item.size === "number" &&
+        totalBytes + item.size > MAX_REPOSITORY_BYTES
+      ) {
+        break;
+      }
+
+      await walk(item.path);
+    }
+  };
+
+  await walk(path);
   return files;
 }
 

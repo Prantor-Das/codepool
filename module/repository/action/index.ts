@@ -6,6 +6,8 @@ import { prisma } from "@/src/prisma/db";
 import { createWebhook, getRepositories } from "@/module/github/lib/github";
 import { inngest } from "@/inngest/client";
 
+const MAX_CONNECTED_REPOSITORIES = 10;
+
 export async function fetchRepositories(page = 1, perPage = 10) {
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) throw new Error("Unauthorized");
@@ -49,6 +51,17 @@ export async function connectedRepo(
       );
     }
     return { connected: true, queued: false };
+  }
+
+  const connectedRepositories = await prisma.orm.public.Repository.where({
+    userId: session.user.id,
+  })
+    .select("id")
+    .all();
+  if (connectedRepositories.length >= MAX_CONNECTED_REPOSITORIES) {
+    throw new Error(
+      `Repository limit reached. You can connect up to ${MAX_CONNECTED_REPOSITORIES} repositories.`,
+    );
   }
 
   const webhook = await createWebhook(owner, repo);

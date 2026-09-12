@@ -5,6 +5,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:tunnel": "node start-tunnel.mjs",
     "inngest:dev": "bunx inngest-cli@latest dev -u http://localhost:3000/api/inngest",
     "build": "next build",
     "start": "next start",
@@ -36,6 +37,7 @@
     "inngest": "^4.20.0",
     "input-otp": "^1.5.0",
     "kysely": "^0.29.5",
+    "localtunnel": "^2.0.2",
     "lucide-react": "^1.44.0",
     "next": "16.3.4",
     "next-themes": "^0.4.6",
