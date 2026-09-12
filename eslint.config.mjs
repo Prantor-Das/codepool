@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     ".claude/**",
     ".cursor/**",
+    ".agents/**",
+    "migrations/snapshots/**",
     "src/prisma/contract.d.ts",
   ]),
 ]);

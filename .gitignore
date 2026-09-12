@@ -30,8 +30,8 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
+# env files
+.env
 
 # vercel
 .vercel
@@ -41,7 +41,6 @@ yarn-error.log*
 next-env.d.ts
 node_modules/
 dist/
-.env
 prisma-next.md
 .agents
 .claude

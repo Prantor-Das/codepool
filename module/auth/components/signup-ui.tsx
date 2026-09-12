@@ -1,11 +1,17 @@
-"use client"
+"use client";
 
 import { signIn, signUp } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { Loader2, LockKeyhole, Mail, ShieldCheck, UserRound } from "lucide-react";
+import {
+  Loader2,
+  LockKeyhole,
+  Mail,
+  ShieldCheck,
+  UserRound,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type FormEvent, useState } from "react";
@@ -40,7 +46,7 @@ export default function SignupUI() {
       name: String(formData.get("name")),
       email: String(formData.get("email")),
       password,
-      callbackURL: "/",
+      callbackURL: "/dashboard",
     });
 
     if (result.error) {
@@ -49,15 +55,20 @@ export default function SignupUI() {
       return;
     }
 
-    router.push("/");
+    router.push("/dashboard");
   };
 
   const handleGithubSignup = async () => {
     setLoading(true);
     setError(null);
-    const result = await signIn.social({ provider: "github", callbackURL: "/" });
+    const result = await signIn.social({
+      provider: "github",
+      callbackURL: "/dashboard",
+    });
     if (result.error) {
-      setError(result.error.message || "GitHub sign-up failed. Please try again.");
+      setError(
+        result.error.message || "GitHub sign-up failed. Please try again.",
+      );
       setLoading(false);
     }
   };
@@ -71,41 +82,161 @@ export default function SignupUI() {
         <div className="hidden flex-col justify-between bg-primary p-10 text-primary-foreground md:flex lg:p-12">
           <div>
             <div className="mb-16 flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-secondary text-sm font-bold text-secondary-foreground">CR</div>
-              <span className="text-sm font-semibold tracking-wide">CodePool</span>
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-secondary text-sm font-bold text-secondary-foreground">
+                CR
+              </div>
+              <span className="text-sm font-semibold tracking-wide">
+                CodePool
+              </span>
             </div>
-            <p className="mb-4 text-xs font-semibold uppercase tracking-[0.22em] text-secondary">Start shipping smarter</p>
-            <h1 className="max-w-sm text-4xl font-semibold leading-tight tracking-[-0.04em] lg:text-5xl">Your code deserves a second set of eyes.</h1>
-            <p className="mt-6 max-w-sm text-sm leading-6 text-primary-foreground/70">Create your workspace and bring thoughtful, automated reviews into every pull request.</p>
+            <p className="mb-4 text-xs font-semibold uppercase tracking-[0.22em] text-secondary">
+              Start shipping smarter
+            </p>
+            <h1 className="max-w-sm text-4xl font-semibold leading-tight tracking-[-0.04em] lg:text-5xl">
+              Your code deserves a second set of eyes.
+            </h1>
+            <p className="mt-6 max-w-sm text-sm leading-6 text-primary-foreground/70">
+              Create your workspace and bring thoughtful, automated reviews into
+              every pull request.
+            </p>
           </div>
-          <div className="flex items-center gap-2 text-xs text-primary-foreground/60"><ShieldCheck className="size-4 text-secondary" />Secure workspace access</div>
+          <div className="flex items-center gap-2 text-xs text-primary-foreground/60">
+            <ShieldCheck className="size-4 text-secondary" />
+            Secure workspace access
+          </div>
         </div>
 
         <div className="p-7 sm:p-10 lg:p-14">
           <div className="mx-auto max-w-md">
             <div className="mb-8 md:hidden">
-              <div className="flex items-center gap-3"><div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-sm font-bold text-primary-foreground">CR</div><span className="text-sm font-semibold tracking-wide">CodePool</span></div>
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-sm font-bold text-primary-foreground">
+                  CR
+                </div>
+                <span className="text-sm font-semibold tracking-wide">
+                  CodePool
+                </span>
+              </div>
             </div>
             <div className="mb-8">
-              <p className="mb-2 text-sm font-medium text-primary">One step away</p>
-              <h2 className="text-3xl font-semibold tracking-[-0.04em]">Create your account</h2>
-              <p className="mt-3 text-sm leading-6 text-muted-foreground">Set up your workspace and start reviewing with confidence.</p>
+              <p className="mb-2 text-sm font-medium text-primary">
+                One step away
+              </p>
+              <h2 className="text-3xl font-semibold tracking-[-0.04em]">
+                Create your account
+              </h2>
+              <p className="mt-3 text-sm leading-6 text-muted-foreground">
+                Set up your workspace and start reviewing with confidence.
+              </p>
             </div>
 
             <form className="space-y-4" onSubmit={handleSignup}>
-              <div className="space-y-2"><Label htmlFor="name">Full name</Label><div className="relative"><UserRound className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input id="name" name="name" placeholder="Ada Lovelace" className="h-11 pl-10" required /></div></div>
-              <div className="space-y-2"><Label htmlFor="email">Email address</Label><div className="relative"><Mail className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input id="email" name="email" type="email" placeholder="you@company.com" className="h-11 pl-10" required /></div></div>
-              <div className="space-y-2"><Label htmlFor="password">Password</Label><div className="relative"><LockKeyhole className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input id="password" name="password" type="password" minLength={8} placeholder="At least 8 characters" className="h-11 pl-10" required /></div></div>
-              <div className="space-y-2"><Label htmlFor="confirmPassword">Confirm password</Label><Input id="confirmPassword" name="confirmPassword" type="password" minLength={8} placeholder="Repeat your password" className="h-11" required /></div>
+              <div className="space-y-2">
+                <Label htmlFor="name">Full name</Label>
+                <div className="relative">
+                  <UserRound className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id="name"
+                    name="name"
+                    placeholder="Ada Lovelace"
+                    className="h-11 pl-10"
+                    required
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="email">Email address</Label>
+                <div className="relative">
+                  <Mail className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id="email"
+                    name="email"
+                    type="email"
+                    placeholder="you@company.com"
+                    className="h-11 pl-10"
+                    required
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <div className="relative">
+                  <LockKeyhole className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    id="password"
+                    name="password"
+                    type="password"
+                    minLength={8}
+                    placeholder="At least 8 characters"
+                    className="h-11 pl-10"
+                    required
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="confirmPassword">Confirm password</Label>
+                <Input
+                  id="confirmPassword"
+                  name="confirmPassword"
+                  type="password"
+                  minLength={8}
+                  placeholder="Repeat your password"
+                  className="h-11"
+                  required
+                />
+              </div>
 
-              {error && <p role="alert" className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
-              <Button type="submit" className="h-11 w-full" disabled={loading}>{loading ? <Loader2 className="size-4 animate-spin" /> : null}{loading ? "Creating account..." : "Create account"}</Button>
+              {error && (
+                <p
+                  role="alert"
+                  className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive"
+                >
+                  {error}
+                </p>
+              )}
+              <Button type="submit" className="h-11 w-full" disabled={loading}>
+                {loading ? <Loader2 className="size-4 animate-spin" /> : null}
+                {loading ? "Creating account..." : "Create account"}
+              </Button>
             </form>
 
-            <div className="my-7 flex items-center gap-3"><Separator className="flex-1" /><span className="text-xs text-muted-foreground">OR CONTINUE WITH</span><Separator className="flex-1" /></div>
-            <Button type="button" variant="outline" className="h-11 w-full gap-2" onClick={handleGithubSignup} disabled={loading}><GithubMark />{loading ? "Connecting..." : "Continue with GitHub"}</Button>
-            <p className="mt-8 text-center text-sm text-muted-foreground">Already have an account? <Link href="/login" className="font-semibold text-primary hover:underline">Sign in</Link></p>
-            <p className="mt-6 text-center text-xs leading-5 text-muted-foreground">By creating an account, you agree to our <Link href="#" className="underline underline-offset-2">Terms</Link> and <Link href="#" className="underline underline-offset-2">Privacy Policy</Link>.</p>
+            <div className="my-7 flex items-center gap-3">
+              <Separator className="flex-1" />
+              <span className="text-xs text-muted-foreground">
+                OR CONTINUE WITH
+              </span>
+              <Separator className="flex-1" />
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11 w-full gap-2"
+              onClick={handleGithubSignup}
+              disabled={loading}
+            >
+              <GithubMark />
+              {loading ? "Connecting..." : "Continue with GitHub"}
+            </Button>
+            <p className="mt-8 text-center text-sm text-muted-foreground">
+              Already have an account?{" "}
+              <Link
+                href="/login"
+                className="font-semibold text-primary hover:underline"
+              >
+                Sign in
+              </Link>
+            </p>
+            <p className="mt-6 text-center text-xs leading-5 text-muted-foreground">
+              By creating an account, you agree to our{" "}
+              <Link href="#" className="underline underline-offset-2">
+                Terms
+              </Link>{" "}
+              and{" "}
+              <Link href="#" className="underline underline-offset-2">
+                Privacy Policy
+              </Link>
+              .
+            </p>
           </div>
         </div>
       </section>
