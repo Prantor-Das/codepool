@@ -31,6 +31,13 @@ function isUniqueConstraintError(error: unknown) {
   );
 }
 
+/** CodePool suggestions use this branch/body marker when they are applied as a PR. */
+function isCodepoolSuggestedPullRequest(pullRequest: Record<string, unknown>) {
+  const head = pullRequest.head as { ref?: unknown } | undefined;
+  const marker = `${pullRequest.title ?? ""}\n${pullRequest.body ?? ""}\n${typeof head?.ref === "string" ? head.ref : ""}`;
+  return /\[codepool-suggested\]|^codepool(?:[-/])/im.test(marker);
+}
+
 export async function POST(req: NextRequest) {
   let deliveryId: string | null = null;
   let claimedDelivery = false;
@@ -84,7 +91,21 @@ export async function POST(req: NextRequest) {
 
       const [owner, repoName] = repo.split("/");
 
-      if (
+      if (action === "closed" && body.pull_request?.merged === true) {
+        const repository = await prisma.orm.public.Repository.where({ owner, name: repoName }).first();
+        if (!repository) throw new Error(`Repository is not connected: ${repo}`);
+        const mergeSha = body.pull_request?.merge_commit_sha;
+        if (typeof mergeSha !== "string") throw new Error("Merged pull request is missing its merge commit SHA");
+        await inngest.send({
+          name: "pull_request.merged",
+          data: {
+            repositoryId: repository.id, owner, repo: repoName, userId: repository.userId,
+            sha: mergeSha, prNumber, url: body.pull_request?.html_url,
+            codepoolSuggested: isCodepoolSuggestedPullRequest(body.pull_request),
+          },
+        });
+        console.log(`[github-webhook] queued pull_request.merged repo=${repo} pr=${prNumber} delivery=${deliveryId}`);
+      } else if (
         action === "opened" ||
         action === "synchronize" ||
         action === "reopened" ||

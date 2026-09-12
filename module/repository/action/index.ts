@@ -88,6 +88,10 @@ export async function connectedRepo(
       name: "repository.connected",
       data: { owner, repo, userId: session.user.id },
     });
+    await inngest.send({
+      name: "repository.sync.requested",
+      data: { repositoryId: repository.id, owner, repo, userId: session.user.id },
+    });
     queued = true;
   } catch (error) {
     console.error(

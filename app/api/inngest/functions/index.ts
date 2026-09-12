@@ -1,4 +1,5 @@
 import { inngest } from "@/inngest/client";
+import { mineRepositoryHistory, ingestMergedPullRequest } from "@/module/knowledge-graph/history/commit-miner";
 
 type ConnectedRepository = {
   id: string;
@@ -18,6 +19,33 @@ import {
   getRepoFileContents,
   updateReviewCheckRun,
 } from "@/module/github/lib/github";
+
+type GraphRepositoryEvent = { repositoryId: string; owner: string; repo: string; userId: string };
+
+async function graphTarget(event: GraphRepositoryEvent) {
+  const account = await prisma.orm.public.Account.where({ userId: event.userId, providerId: "github" }).first();
+  if (!account?.accessToken) throw new Error("No GitHub access token found for graph ingestion");
+  return { repositoryId: event.repositoryId, owner: event.owner, repo: event.repo, token: account.accessToken };
+}
+
+export const syncRepositoryHistory = inngest.createFunction(
+  { id: "repository-sync-history", triggers: [{ event: "repository.sync.requested" }] },
+  async ({ event, step }) => step.run("mine-full-commit-history", async () => mineRepositoryHistory(await graphTarget(event.data as GraphRepositoryEvent))),
+);
+
+/** Kept separate so callers can request an AST graph refresh through the documented event. */
+export const buildRepositoryGraph = inngest.createFunction(
+  { id: "repository-graph-build", triggers: [{ event: "repository.graph.build.requested" }] },
+  async ({ event, step }) => step.run("build-ast-symbol-graph", async () => mineRepositoryHistory(await graphTarget(event.data as GraphRepositoryEvent))),
+);
+
+export const ingestMergedPullRequestGraph = inngest.createFunction(
+  { id: "pull-request-merged-graph-ingestion", triggers: [{ event: "pull_request.merged" }] },
+  async ({ event, step }) => step.run("ingest-merged-pr-files", async () => {
+    const data = event.data as GraphRepositoryEvent & { sha: string; prNumber: number; url?: string; codepoolSuggested?: boolean };
+    return ingestMergedPullRequest(await graphTarget(data), data);
+  }),
+);
 
 export const helloWorld = inngest.createFunction(
   { id: "code-horse", triggers: [{ event: "test/hello.world" }] },
