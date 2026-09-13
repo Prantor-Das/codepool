@@ -1,0 +1,6 @@
+PASS: high impact alone triggers sandbox execution
+PASS: low risk does not trigger sandbox execution
+PASS: body-only edits still resolve their changed file's symbols
+PASS: antibody found two CALLS hops away
+PASS: affected Endpoint found
+PASS: ImpactScore (0.90) exceeds sandbox threshold (0.75)

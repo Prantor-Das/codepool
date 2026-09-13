@@ -1,5 +1,6 @@
+import { DaytonaSandboxProvisioner } from "@/module/execution/sandbox/daytona-provisioner";
+import { downloadGitHubArchive } from "@/module/execution/sandbox/archive";
 import { inngest } from "@/inngest/client";
-import { getSandboxProvisioner } from "@/module/execution/sandbox/provisioner";
 import { runDifferentialPipeline } from "@/module/execution/pipeline";
 import { snapshotFromFixture } from "@/module/execution/seed/fixtures";
 import type { Scenario } from "@/module/execution/traffic/scenario-runner";
@@ -14,11 +15,10 @@ export const buildSandbox = inngest.createFunction(
   { id: "build-sandbox-pair", triggers: [{ event: "sandbox.build.requested" }] },
   async ({ event, step }) => {
     const data = event.data as SandboxBuildEvent;
-    const provisioner = getSandboxProvisioner();
-    const pair = await step.run("provision-isolated-sandbox-pair", () => provisioner.provisionPair(data.baseSha, data.prSha));
-    await provisioner.teardown(pair.pairId);
-    await inngest.send({ name: "sandbox.ready", data: { ...data, pairId: pair.pairId } });
-    return { pairId: pair.pairId };
+    // Provision and execute within one durable step; class instances cannot be serialized.
+    await step.sendEvent("request-differential-run", { name: "differential-run.requested", data });
+    return { requested: true };
+
   },
 );
 
@@ -35,10 +35,15 @@ export const runDifferential = inngest.createFunction(
   async ({ event, step }) => {
     const data = event.data as SandboxBuildEvent;
     const seed = snapshotFromFixture({ version: data.fixtureVersion, format: "sql", fixture: data.fixture });
-    const result = await step.run("run-identical-traffic-against-both-branches", () => runDifferentialPipeline({
-      repositoryId: data.repositoryId, pullRequestId: data.pullRequestId, baseSha: data.baseSha, prSha: data.prSha,
-      seed, scenarios: data.scenarios, runId: data.runId,
-    }));
+    const result = await step.run("run-identical-traffic-against-both-branches", async () => {
+      const repository = await prisma.orm.public.Repository.where({ id: data.repositoryId, userId: data.userId }).first();
+      if (!repository || !data.userId || data.pullRequestId !== `${repository.id}:pr:${data.prNumber}`) throw new Error("Invalid sandbox repository context.");
+      const account = await prisma.orm.public.Account.where({ userId: repository.userId, providerId: "github" }).first();
+      if (!account?.accessToken) throw new Error("GitHub account unavailable for archive checkout.");
+      const provisioner = process.env.SANDBOX_PROVIDER === "daytona" ? new DaytonaSandboxProvisioner(undefined, sha => downloadGitHubArchive(repository.owner, repository.name, sha, account.accessToken!)) : undefined;
+      return runDifferentialPipeline({ repositoryId: repository.id, pullRequestId: data.pullRequestId, baseSha: data.baseSha, prSha: data.prSha,
+        seed, scenarios: data.scenarios, runId: data.runId, provisioner });
+    });
     await inngest.send({ name: "differential-run.completed", data: { ...data, pairId: result.pairId, evidence: result.evidence } });
     return result;
   },

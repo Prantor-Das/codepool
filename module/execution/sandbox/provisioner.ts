@@ -31,6 +31,7 @@ export interface SandboxEnvironment {
   request(request: SandboxRequest): Promise<SandboxResponse>;
   seedDatabase(snapshot: SeedSnapshot): Promise<string>;
   seedRedis(snapshot: SeedSnapshot): Promise<string>;
+  auditEgress?(): Promise<{ policy: "block-all"; replayed: number; misses: number; verified: true }>;
 }
 
 export interface SandboxPair {

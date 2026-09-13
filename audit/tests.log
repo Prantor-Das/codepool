@@ -1,0 +1,44 @@
+bun test v1.4.2 (744846f84)
+
+module/knowledge-graph/feedback-handler.test.ts:
+(pass) runtime feedback authorization > unauthenticated requests return 401 without writes [11.61ms]
+(pass) runtime feedback authorization > cross-tenant repository is forbidden [5.76ms]
+(pass) runtime feedback authorization > owned repository cannot authorize an unrelated antibody or PR [0.94ms]
+(pass) runtime feedback authorization > cross-origin requests and invalid payloads fail closed [0.14ms]
+(pass) runtime feedback authorization > oversized payload is rejected before JSON parsing [2.61ms]
+(pass) runtime feedback authorization > real click payload uses trusted actor/invariant and stable receipt [10.87ms]
+
+module/ai/explain-runtime-diff.test.ts:
+(pass) runtime evidence cannot claim E5 without verified egress [1.89ms]
+(pass) model overclaims are clamped and malformed findings rejected [1.88ms]
+
+module/github/lib/github.test.jsx:
+(pass) review check lifecycle > models queued to in_progress to completed [0.04ms]
+(pass) review check lifecycle > models a failed check without exposing the original error [0.14ms]
+
+module/execution/traffic/replay-proxy.test.ts:
+(pass) uploaded offline replay service returns recorded responses and fails closed on misses [4.38ms]
+
+module/execution/sandbox/security.test.ts:
+(pass) all graph labels have uniqueness constraints [0.02ms]
+(pass) nested evidence is serialized and provenance cannot be overwritten [0.18ms]
+(pass) high impact alone routes to sandbox; low impact does not [0.06ms]
+(pass) sandbox requests cannot escape preview origin [1.43ms]
+(pass) database isolation rejects external/shared hosts [2.06ms]
+(pass) archive checkout requires full SHA, digest and short TTL [0.89ms]
+(pass) unsafe Compose is rejected [0.14ms]
+(pass) nested UUIDs and timestamps canonicalize identically [0.36ms]
+(pass) Compose cannot smuggle host sockets through configs or disable no-new-privileges [0.27ms]
+
+module/execution/sandbox/daytona-provisioner.test.ts:
+(pass) Daytona enforces firewall, uploads only bytes, audits replay, and cleans up across instances [2.58ms]
+
+module/reviews/components/review-content.test.jsx:
+(pass) ReviewContent > renders a model fix prompt in its own code block [11.86ms]
+(pass) ReviewContent > uses a useful fallback when fixPrompt is absent [1.35ms]
+(pass) ReviewContent > does not render injected HTML from a fix prompt [22.50ms]
+
+ 24 pass
+ 0 fail
+ 67 expect() calls
+Ran 24 tests across 7 files. [934.00ms]

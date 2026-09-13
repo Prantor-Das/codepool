@@ -29,7 +29,11 @@ export async function runDifferentialPipeline(input: DifferentialRunInput): Prom
     const selected = input.scenarios ? { source: "integration-test" as const, scenarios: input.scenarios } : selectScenarios(input.scenarioSources ?? {});
     const runs = await runScenarioPair(pair, selected.scenarios);
     const evidence = buildEvidenceObject({ runId: input.runId, pairId: pair.pairId, seedId: input.seed.seedId, baseSha: input.baseSha, prSha: input.prSha, scenarioSource: selected.source, base: runs.base, pr: runs.pr, firstTimeSeen: input.firstTimeSeen });
-    if (input.persistEvidence !== false) await persistEvidenceObject({ repositoryId: input.repositoryId, pullRequestId: input.pullRequestId, evidence, antibodyId: undefined });
+    if (pair.baseEnv.auditEgress && pair.prEnv.auditEgress) {
+      const [base, pr] = await Promise.all([pair.baseEnv.auditEgress(), pair.prEnv.auditEgress()]);
+      evidence.egress = { policy: "block-all", verified: true, baseReplayed: base.replayed, prReplayed: pr.replayed, misses: base.misses + pr.misses };
+    }
+    if (input.persistEvidence !== false && (evidence.json.length || evidence.statuses.length || evidence.headers.length || evidence.latency.some(item => item.flagged))) await persistEvidenceObject({ repositoryId: input.repositoryId, pullRequestId: input.pullRequestId, evidence, antibodyId: undefined });
     return { evidence, pairId: pair.pairId };
   });
 }

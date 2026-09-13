@@ -1,3 +1,4 @@
+import { readBoundedBody, BodyTooLargeError } from "@/lib/http-body";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { inngest } from "@/inngest/client";
 import { prisma } from "@/src/prisma/db";
@@ -8,6 +9,7 @@ function verifySignature(rawBody: Buffer, signature: string | null) {
   const secret = process.env.GITHUB_WEBHOOK_SECRET;
   if (!secret || !signature?.startsWith("sha256=")) return false;
 
+  if (!/^sha256=[a-f0-9]{64}$/.test(signature)) return false;
   const received = signature.slice("sha256=".length);
   const expected = createHmac("sha256", secret)
     .update(rawBody)
@@ -42,7 +44,7 @@ export async function POST(req: NextRequest) {
   let deliveryId: string | null = null;
   let claimedDelivery = false;
   try {
-    const rawBody = Buffer.from(await req.arrayBuffer());
+    const rawBody = await readBoundedBody(req, 2 * 1024 * 1024);
     if (!verifySignature(rawBody, req.headers.get("x-hub-signature-256"))) {
       return NextResponse.json(
         { error: "Invalid webhook signature" },
@@ -163,6 +165,7 @@ export async function POST(req: NextRequest) {
       { status: 200 },
     );
   } catch (error) {
+    if (error instanceof BodyTooLargeError) return NextResponse.json({ error: "Payload too large" }, { status: 413 });
     // A delivery is only deduplicated after all durable handoff work succeeds.
     // Releasing our own claim lets GitHub retry transient database/API failures.
     if (claimedDelivery && deliveryId) {

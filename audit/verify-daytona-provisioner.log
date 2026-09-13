@@ -1,0 +1,2 @@
+PASS: configured Daytona template exists and meets resource ceilings.
+SKIP: live pair verification needs DAYTONA_REPO_ARCHIVES_JSON, full base/PR verification SHAs, and SANDBOX_FIXTURE_SNAPSHOT. Production workers download commit archives on the control plane using the repository owner's GitHub account.

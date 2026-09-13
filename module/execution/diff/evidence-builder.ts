@@ -18,6 +18,7 @@ export interface EvidenceObject {
   headers: HeaderDiff[];
   latency: LatencyDiff[];
   database?: DatabaseDiff;
+  egress?: { policy: "block-all"; verified: true; baseReplayed: number; prReplayed: number; misses: number };
   firstTimeSeen: boolean;
   createdAt: string;
 }

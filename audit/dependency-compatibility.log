@@ -1,0 +1,1 @@
+PASS: LocalTunnel metadata request works with patched Axios 1.20.0. No public tunnel was opened.

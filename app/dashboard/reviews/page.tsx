@@ -1,5 +1,6 @@
 "use client";
 
+import { RuntimeFeedback } from "@/module/reviews/components/runtime-feedback";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ExternalLink, FileSearch } from "lucide-react";
@@ -121,6 +122,7 @@ export default function ReviewsPage() {
               ) : (
                 <div className="max-w-none space-y-4 text-sm leading-6 [&_a]:text-primary [&_a]:underline [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-xs [&_h1]:text-2xl [&_h1]:font-semibold [&_h2]:mt-6 [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mt-5 [&_h3]:text-lg [&_h3]:font-semibold [&_li]:ml-5 [&_li]:list-disc [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-4 [&_pre]:text-xs [&_strong]:font-semibold [&_ul]:space-y-1">
                   <ReviewBody value={selectedReviewQuery.data.review} />
+                  <RuntimeFeedback reviewId={selectedReviewQuery.data.id} repositoryId={selectedReviewQuery.data.repositoryId} prNumber={selectedReviewQuery.data.prNumber} />
                 </div>
               )}
             </>

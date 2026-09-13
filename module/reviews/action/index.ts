@@ -1,5 +1,6 @@
 "use server";
 
+import { getFeedbackTargets } from "@/module/knowledge-graph/feedback-targets";
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/src/prisma/db";
@@ -48,7 +49,8 @@ export async function getReviews(repositoryId?: string) {
   const repositoryNames = new Map(
     ownedRepositories.map((repository) => [repository.id, repository.fullName]),
   );
-  const reviews = await prisma.orm.public.Review.select(
+  if (!ownedRepositories.length) return [];
+  const reviews = await prisma.orm.public.Review.where(review => review.repositoryId.in(ownedRepositories.map(repository => repository.id))).select(
     "id",
     "repositoryId",
     "prNumber",
@@ -96,4 +98,9 @@ export async function getReviewById(reviewId: string) {
 
   if (!repository) throw new Error("Unauthorized");
   return serializeReview(review, repository.fullName);
+}
+
+export async function getReviewFeedbackTargets(reviewId: string) {
+  const review = await getReviewById(reviewId);
+  return getFeedbackTargets(review.repositoryId, `${review.repositoryId}:pr:${review.prNumber}`);
 }

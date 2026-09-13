@@ -20,3 +20,5 @@ export function getPineconeIndex() {
 
   return pineconeIndex;
 }
+
+export const ANTIBODY_NAMESPACE = "repo-antibodies";

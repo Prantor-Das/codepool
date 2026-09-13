@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { ingestExtractedCommit } from "../module/knowledge-graph/history/commit-miner";
-import { runQuery } from "../module/knowledge-graph/lib/graph-client";
+import { runQuery, closeGraphDriver } from "../module/knowledge-graph/lib/graph-client";
 import { initializeGraphSchema } from "../module/knowledge-graph/schema/constraints";
 
 const suffix = `ingestion-fixture-${Date.now()}`;
@@ -37,7 +37,9 @@ try {
   console.error("FAIL: ingestion verification could not complete.", error);
 } finally {
   if (process.env.NEO4J_URI && process.env.NEO4J_USER && process.env.NEO4J_PASSWORD) {
-    try { await runQuery("MATCH (n {id: $repositoryId}) DETACH DELETE n", { repositoryId }); } catch (error) { failures += 1; console.error("FAIL: cleanup.", error); }
+    try { await runQuery("MATCH (n) WHERE n.id STARTS WITH $repositoryId DETACH DELETE n", { repositoryId }); } catch (error) { failures += 1; console.error("FAIL: cleanup.", error); }
   }
 }
 if (failures) process.exitCode = 1;
+
+await closeGraphDriver();

@@ -1,0 +1,8 @@
+PASS: both sandboxes received identical seedId
+PASS: fake provider kept base and PR environments isolated
+PASS: structural/status diff flags the reintroduced transfer bug
+PASS: latency diff fires above the 15% threshold
+PASS: provider cleanup runs after the differential pipeline
+PASS: latency diff does not flag a no-op PR
+PASS: no-op PR has no status or body diff
+FAIL: no execution layer imports a concrete sandbox vendor SDK

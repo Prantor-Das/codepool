@@ -1,0 +1,1 @@
+{"kind":"result","envelope":{"ok":true,"commandId":"version","result":{"version":"8.0.0-rc.13"},"exitCode":0,"diagnostics":[],"nextActions":[]},"commandId":"version","timestamp":"2026-09-13T03:27:15.756Z"}

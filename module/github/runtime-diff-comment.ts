@@ -53,7 +53,7 @@ export function formatRuntimeDiffComment(bundle: RuntimeDiffEvidenceBundle, expl
     "### Findings", findings || "No finding was generated from the supplied evidence.",
     `<details><summary>Raw canonical JSON diff</summary>\n\n\`\`\`json\n${raw}\n\`\`\`\n</details>`,
     "---",
-    "Was CodePool correct? React to this comment with ✅ Regression, 🚀 Intentional Change, or ❌ False Positive.",
+    "Was CodePool correct? Open this pull request in the CodePool dashboard → Reviews and use the Runtime evidence feedback buttons.",
   ].join("\n\n");
 }
 

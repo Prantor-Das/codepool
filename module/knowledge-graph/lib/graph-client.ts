@@ -14,6 +14,7 @@ export function getGraphDriver(): Driver {
     driver = neo4j.driver(
       getRequiredEnv("NEO4J_URI"),
       neo4j.auth.basic(getRequiredEnv("NEO4J_USER"), getRequiredEnv("NEO4J_PASSWORD")),
+      { connectionAcquisitionTimeout: 15_000, connectionTimeout: 10_000 },
     );
   }
   return driver;
@@ -32,3 +33,5 @@ export function runQuery(cypher: string, params: Record<string, unknown> = {}): 
   return withSession((session) => session.run(cypher, params));
 }
 
+
+export async function closeGraphDriver() { await driver?.close(); driver = undefined; }

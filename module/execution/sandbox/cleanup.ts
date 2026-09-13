@@ -2,11 +2,7 @@ import type { SandboxPair, SandboxProvisioner } from "./provisioner";
 
 /** Always tears down both sides through the provider contract. */
 export async function cleanupSandboxPair(provisioner: SandboxProvisioner, pair: SandboxPair): Promise<void> {
-  try {
-    await provisioner.teardown(pair.pairId);
-  } catch (error) {
-    console.error(`Failed to tear down sandbox pair ${pair.pairId}:`, error);
-  }
+  await provisioner.teardown(pair.pairId);
 }
 
 export async function withSandboxCleanup<T>(

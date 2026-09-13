@@ -87,6 +87,7 @@ export function ProfileForm() {
             <Label htmlFor="profile-email">Email</Label>
             <Input
               id="profile-email"
+              readOnly
               type="email"
               value={email}
               onChange={(event) =>
@@ -95,6 +96,7 @@ export function ProfileForm() {
               disabled={updateMutation.isPending}
               autoComplete="email"
             />
+            <p className="text-xs text-muted-foreground">Your sign-in email cannot be changed here.</p>
           </div>
           {updateMutation.isError && (
             <p role="alert" className="text-sm text-destructive">

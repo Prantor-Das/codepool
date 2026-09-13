@@ -101,6 +101,7 @@ export const generateReview = inngest.createFunction(
             prSha: headSha,
             fixture: process.env.SANDBOX_FIXTURE_SNAPSHOT,
             fixtureVersion: process.env.SANDBOX_FIXTURE_VERSION ?? "configured",
+            scenarios: JSON.parse(process.env.SANDBOX_SCENARIOS_JSON ?? "[]"),
             runId: `${repositoryId}:${prNumber}:${headSha}`,
             explicitFullVerification: labels?.includes("full-verification") === true,
             owner, repo, prNumber, userId,

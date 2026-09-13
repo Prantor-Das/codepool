@@ -1,5 +1,7 @@
 "use server";
 
+import { auth } from "@/lib/auth";
+import { headers } from "next/headers";
 import { inngest } from "@/inngest/client";
 import { prisma } from "@/src/prisma/db";
 
@@ -10,9 +12,13 @@ export async function reviewPullRequest(
   repo: string,
   prNumber: number,
 ) {
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session?.user) throw new Error("Unauthorized");
+  if (!Number.isSafeInteger(prNumber) || prNumber < 1) throw new Error("Invalid pull request number");
   const repository = await prisma.orm.public.Repository.where({
     owner,
     name: repo,
+    userId: session.user.id,
   }).first();
 
   if (!repository) {
@@ -71,8 +77,7 @@ export async function reviewPullRequest(
       message: "Review queued",
     };
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "Unknown error occurred";
+    const message = "Unable to queue review. Please try again.";
     console.error(
       `Failed to enqueue review for ${owner}/${repo}#${prNumber}:`,
       error,

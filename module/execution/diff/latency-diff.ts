@@ -10,7 +10,7 @@ export function diffLatency(base: RequestObservation[], pr: RequestObservation[]
     const left = latencyStats(base.filter((item) => item.scenarioId === scenarioId).map((item) => item.elapsedMs));
     const right = latencyStats(pr.filter((item) => item.scenarioId === scenarioId).map((item) => item.elapsedMs));
     const deltas = { p50: relativeDelta(left.p50, right.p50), p90: relativeDelta(left.p90, right.p90), p95: relativeDelta(left.p95, right.p95), p99: relativeDelta(left.p99, right.p99) };
-    return { scenarioId, base: left, pr: right, deltas, threshold, flagged: Object.values(deltas).some((delta) => delta > threshold) };
+    return { scenarioId, base: left, pr: right, deltas, threshold, flagged: base.filter(item => item.scenarioId === scenarioId).length >= 20 && pr.filter(item => item.scenarioId === scenarioId).length >= 20 && Object.values(deltas).some((delta) => delta > threshold) };
   });
 }
 function relativeDelta(base: number, pr: number): number { return base === 0 ? (pr > 0 ? 1 : 0) : (pr - base) / base; }

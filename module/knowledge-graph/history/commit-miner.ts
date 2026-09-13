@@ -85,11 +85,11 @@ export async function ingestExtractedCommit(repositoryId: string, input: CommitI
     const prId = `${repositoryId}:pr:${input.pullRequest.number}`;
     await runQuery(
       `MERGE (pr:PullRequest {id: $prId})
-       SET pr.number = $number, pr.url = $url, pr.origin = $origin, pr.sourceType = $gitSource, pr.confidence = $confidence
+       SET pr.repositoryId = $repositoryId, pr.number = $number, pr.url = $url, pr.origin = $origin, pr.sourceType = $gitSource, pr.confidence = $confidence
        MATCH (commit:Commit {id: $commitId})
        MERGE (commit)-[part:PART_OF_PR]->(pr)
        SET part.sourceType = $gitSource, part.confidence = $confidence`,
-      { prId, number: input.pullRequest.number, url: input.pullRequest.url ?? "", origin: input.pullRequest.origin ?? "github", commitId: commit, gitSource: GIT.sourceType, confidence: GIT.confidence },
+      { repositoryId, prId, number: input.pullRequest.number, url: input.pullRequest.url ?? "", origin: input.pullRequest.origin ?? "github", commitId: commit, gitSource: GIT.sourceType, confidence: GIT.confidence },
     );
   }
 

@@ -55,3 +55,23 @@ export function createReplayEgressHandler(proxy: ReplayProxy, mode: EgressMode, 
     return proxy.replay(request);
   };
 }
+
+/** Standalone offline replay endpoint uploaded to each VM; it has no live transport. */
+export function replayServiceScript(entries: CassetteEntry[]): string {
+  const cassette = new ReplayProxy(entries).entries();
+  return `const { createServer } = require('node:http');
+const { createHash } = require('node:crypto');
+const cassette = new Map(${JSON.stringify(cassette)}.map(e => [e.key, e.response]));
+let replayed = 0, misses = 0;
+createServer(async (req, res) => {
+  if (req.method === 'GET' && req.url === '/audit') { res.end(JSON.stringify({ mode: 'offline-replay', replayed, misses })); return; }
+  if (req.method !== 'POST' || req.url !== '/replay') { res.writeHead(405); res.end(); return; }
+  try {
+    let body = ''; for await (const chunk of req) { body += chunk; if (body.length > 1048576) throw new Error('too large'); }
+    const request = JSON.parse(body);
+    const key = createHash('sha256').update(JSON.stringify({ method: request.method.toUpperCase(), path: request.path, headers: request.headers ?? {}, body: request.body ?? null })).digest('hex');
+    if (!cassette.has(key)) { misses++; res.writeHead(502); res.end('No replay cassette entry'); return; }
+    replayed++; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(cassette.get(key)));
+  } catch { misses++; res.writeHead(400); res.end('Invalid replay request'); }
+}).listen(8787, '0.0.0.0');`;
+}

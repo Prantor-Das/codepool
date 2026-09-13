@@ -1,0 +1,11 @@
+PASS: nested runtime evidence persists as valid Neo4j JSON property
+PASS: formatted comment has confirmed-regression header
+PASS: formatted comment surfaces Evidence E5
+PASS: formatted comment includes comparison table, invariant, and raw diff
+PASS: dashboard POST handler updates the live graph
+PASS: Regression feedback increases Antibody confidence
+PASS: Regression feedback verifies the Antibody
+PASS: duplicate feedback does not change confidence twice
+PASS: false positives eventually reject the antibody
+PASS: ingestion preserves human feedback lifecycle
+PASS: self-audit reports the CodePool suggestion that triggered an antibody match

@@ -21,15 +21,18 @@ export async function getUserProfile() {
 
 export async function updateUserProfile(data: { name: string; email: string }) {
   const session = await getSession();
+  if (typeof data.name !== "string" || typeof data.email !== "string") throw new Error("Invalid profile.");
   const name = data.name.trim();
   const email = data.email.trim().toLowerCase();
   if (name.length < 2) throw new Error("Name must be at least 2 characters.");
   if (!/^\S+@\S+\.\S+$/.test(email))
     throw new Error("Enter a valid email address.");
 
+  const current = await prisma.orm.public.User.where({ id: session.user.id }).select("email").first();
+  if (!current || current.email.toLowerCase() !== email) throw new Error("Email changes require verification and are currently unavailable.");
   const user = await prisma.orm.public.User.where({ id: session.user.id })
     .select("id", "name", "email", "image")
-    .update({ name, email });
+    .update({ name });
 
   revalidatePath("/dashboard/settings");
   return { success: true, user };

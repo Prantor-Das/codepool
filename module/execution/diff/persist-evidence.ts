@@ -8,7 +8,7 @@ export async function persistEvidenceObject(input: { repositoryId: string; pullR
   let antibodyId = input.antibodyId;
   let createdAntibody = false;
   if (!antibodyId) {
-    antibodyId = `${input.repositoryId}:antibody:runtime:${createHash("sha256").update(JSON.stringify(input.evidence.json) + JSON.stringify(input.evidence.statuses)).digest("hex").slice(0, 24)}`;
+    antibodyId = `${input.repositoryId}:antibody:runtime:${createHash("sha256").update(JSON.stringify({ json: input.evidence.json, statuses: input.evidence.statuses, headers: input.evidence.headers, latency: input.evidence.latency.filter(item => item.flagged).map(item => item.scenarioId), database: input.evidence.database })).digest("hex").slice(0, 24)}`;
     const existing = await runQuery("MATCH (a:Antibody {id: $id}) RETURN a.id AS id LIMIT 1", { id: antibodyId });
     if (!existing.records.length) {
       await writeNode("Antibody", antibodyId, { problem: "First-time sandbox differential failure", status: "observed", evidenceRunId: input.evidence.runId }, { sourceType: "runtime", confidence: 1 });

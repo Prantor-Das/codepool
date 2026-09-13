@@ -43,6 +43,7 @@ async function runBranch(environment: SandboxEnvironment, scenarios: Scenario[],
   const observations: RequestObservation[] = [];
   for (const scenario of scenarios) {
     const iterations = scenario.iterations ?? 20;
+    if (!Number.isInteger(iterations) || iterations < 1 || iterations > 100) throw new Error("Scenario iterations must be between 1 and 100.");
     for (let iteration = 1; iteration <= iterations; iteration += 1) {
       const response: SandboxResponse = await environment.request({ method: scenario.method, path: scenario.path, headers: scenario.headers, body: scenario.body });
       observations.push({ scenarioId: scenario.id, iteration, method: scenario.method, path: scenario.path, ...response });
@@ -52,6 +53,7 @@ async function runBranch(environment: SandboxEnvironment, scenarios: Scenario[],
 }
 
 export async function runScenarioPair(pair: SandboxPair, scenarios: Scenario[]): Promise<{ base: BranchRun; pr: BranchRun }> {
+  if (!scenarios.length || scenarios.length > 100) throw new Error("A differential run requires 1–100 scenarios.");
   const base = await runBranch(pair.baseEnv, scenarios, "base");
   const pr = await runBranch(pair.prEnv, scenarios, "pr");
   return { base, pr };

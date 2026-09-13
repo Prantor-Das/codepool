@@ -4,7 +4,7 @@ export const graphLabels = [
   "Repository", "Branch", "Commit", "PullRequest", "Issue", "File", "Symbol",
   "SymbolVersion", "Endpoint", "DatabaseEntity", "ExternalService", "Test", "Bug",
   "Invariant", "Antibody", "Scenario", "ExecutionRun", "Observation", "Finding",
-  "IncidentObservation",
+  "IncidentObservation", "Feedback",
 ] as const;
 
 export type GraphLabel = (typeof graphLabels)[number];
@@ -34,14 +34,26 @@ function assertSafeIdentifier(value: string, kind: string): void {
   if (!/^[A-Za-z][A-Za-z0-9_]*$/.test(value)) throw new Error(`Invalid graph ${kind}: ${value}`);
 }
 
+/** Neo4j properties cannot contain maps or nested arrays. Preserve these as JSON. */
+export function graphProperties(properties: GraphProperties): GraphProperties {
+  return Object.fromEntries(Object.entries(properties).filter(([key, value]) => !["id", "sourceType", "confidence"].includes(key) && value !== undefined).map(([key, value]) => [key,
+    value !== null && typeof value === "object" && (!Array.isArray(value) || value.some(item => item === null || typeof item === "object") || new Set(value.map(item => typeof item)).size > 1) ? JSON.stringify(value) : value,
+  ]));
+}
+
 export async function writeNode(label: GraphLabel, id: string, properties: GraphProperties, provenance: Provenance) {
   assertSafeIdentifier(label, "label");
   assertProvenance(provenance);
   return runQuery(
     `MERGE (n:${label} {id: $id})
-     SET n += $properties, n.sourceType = $sourceType, n.confidence = $confidence
+     WITH n, CASE WHEN $lifecycle AND n.lastFeedback IS NOT NULL THEN true ELSE false END AS protected,
+          n.status AS previousStatus, n.confidence AS previousConfidence, n.sourceType AS previousSource
+     SET n += $properties
+     SET n.status = CASE WHEN protected THEN previousStatus ELSE n.status END,
+         n.sourceType = CASE WHEN protected OR coalesce(previousConfidence, -1) > $confidence THEN previousSource ELSE $sourceType END,
+         n.confidence = CASE WHEN protected OR coalesce(previousConfidence, -1) > $confidence THEN previousConfidence ELSE $confidence END
      RETURN n`,
-    { id, properties, sourceType: provenance.sourceType, confidence: provenance.confidence },
+    { id, properties: graphProperties(properties), lifecycle: label === "Antibody" || label === "Invariant", sourceType: provenance.sourceType, confidence: provenance.confidence },
   );
 }
 
@@ -60,10 +72,13 @@ export async function writeRelationship(
     `MATCH (from:${from.label} {id: $fromId})
      MATCH (to:${to.label} {id: $toId})
      MERGE (from)-[r:${relationshipType}]->(to)
-     SET r += $properties, r.sourceType = $sourceType, r.confidence = $confidence
+     WITH r, r.confidence AS previousConfidence, r.sourceType AS previousSource
+     SET r += $properties,
+         r.sourceType = CASE WHEN coalesce(previousConfidence, -1) > $confidence THEN previousSource ELSE $sourceType END,
+         r.confidence = CASE WHEN coalesce(previousConfidence, -1) > $confidence THEN previousConfidence ELSE $confidence END
      RETURN r`,
     {
-      fromId: from.id, toId: to.id, properties,
+      fromId: from.id, toId: to.id, properties: graphProperties(properties),
       sourceType: provenance.sourceType, confidence: provenance.confidence,
     },
   );

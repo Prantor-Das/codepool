@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
-import { getPineconeIndex } from "@/lib/pinecone";
+import { getPineconeIndex, ANTIBODY_NAMESPACE } from "@/lib/pinecone";
 import { runQuery } from "../lib/graph-client";
 import { writeNode, writeRelationship, type Provenance } from "../lib/graph-writer";
 import { classifyBugFix, type BugClassification, type HistoricalPullRequest } from "./bug-classifier";
 import { extractAntibody, type AntibodyExtraction } from "./antibody-extractor";
 import { extractInvariant, type InvariantExtraction } from "./invariant-extractor";
 
-const PINECONE_NAMESPACE = "repo-antibodies";
+
 const PINECONE_TEXT_FIELD = process.env.PINECONE_TEXT_FIELD ?? "text";
 
 export type BugFixPipelineDependencies = {
@@ -27,7 +27,7 @@ export async function writeBugFixKnowledge(pr: HistoricalPullRequest, classifica
   const pullRequest = pullRequestId(pr), bug = `${pullRequest}:bug`, invariantNode = invariantId(pr.repositoryId, invariant.statement), antibodyNode = `${pullRequest}:antibody`;
   const provenance: Provenance = { sourceType: "llm", confidence: classification.confidence };
   const extractionProvenance: Provenance = { sourceType: "llm", confidence: Math.min(classification.confidence, antibody.confidence, invariant.confidence) };
-  await writeNode("PullRequest", pullRequest, { number: pr.prNumber, title: pr.title }, provenance);
+  await writeNode("PullRequest", pullRequest, { repositoryId: pr.repositoryId, number: pr.prNumber, title: pr.title }, provenance);
   await writeNode("Bug", bug, { title: pr.title, status: "candidate" }, provenance);
   await writeNode("Invariant", invariantNode, { statement: invariant.statement, category: invariant.category, severity: invariant.severity, status: "candidate", validFrom: new Date().toISOString(), validUntil: null, supersededBy: null }, extractionProvenance);
   await writeNode("Antibody", antibodyNode, { problem: antibody.problem, rootCause: antibody.rootCause, status: "candidate" }, extractionProvenance);
@@ -44,7 +44,7 @@ export async function writeBugFixKnowledge(pr: HistoricalPullRequest, classifica
   for (const symbolId of pr.symbolIds) await writeRelationship({ label: "Antibody", id: antibodyNode }, "WATCHES", { label: "Symbol", id: symbolId }, provenance);
   for (const test of pr.regressionTests ?? []) await writeRelationship({ label: "Antibody", id: antibodyNode }, "VERIFIED_BY", { label: "Test", id: test.id }, provenance);
   const antibodyText = `Problem: ${antibody.problem}\nRoot cause: ${antibody.rootCause}`;
-  await getPineconeIndex().namespace(PINECONE_NAMESPACE).upsertRecords({ records: [{ _id: antibodyNode, [PINECONE_TEXT_FIELD]: antibodyText, neo4jId: antibodyNode, repositoryId: pr.repositoryId, status: "candidate" }] });
+  await getPineconeIndex().namespace(ANTIBODY_NAMESPACE).upsertRecords({ records: [{ _id: antibodyNode, [PINECONE_TEXT_FIELD]: antibodyText, neo4jId: antibodyNode, repositoryId: pr.repositoryId, status: "candidate" }] });
   return { pullRequestId: pullRequest, bugId: bug, invariantId: invariantNode, antibodyId: antibodyNode };
 }
 
@@ -56,6 +56,8 @@ export async function runBugFixPipeline(pr: HistoricalPullRequest, dependencies:
 }
 
 export async function deleteBugFixKnowledge(ids: BugFixKnowledgeIds) {
-  await runQuery("MATCH (n) WHERE n.id IN $ids DETACH DELETE n", { ids: Object.values(ids) });
-  try { await getPineconeIndex().namespace(PINECONE_NAMESPACE).deleteOne({ id: ids.antibodyId }); } catch (error) { console.warn("Could not clean up antibody vector:", error); }
+  // Invariants and PRs are shared knowledge; delete an invariant only when orphaned.
+  await runQuery("MATCH (n) WHERE n.id IN $ids DETACH DELETE n", { ids: [ids.antibodyId, ids.bugId] });
+  await runQuery("MATCH (i:Invariant {id: $id}) WHERE NOT (i)--() DELETE i", { id: ids.invariantId });
+  try { await getPineconeIndex().namespace(ANTIBODY_NAMESPACE).deleteOne({ id: ids.antibodyId }); } catch (error) { console.warn("Could not clean up antibody vector:", error); }
 }

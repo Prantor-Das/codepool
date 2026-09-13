@@ -1,5 +1,6 @@
 import "dotenv/config";
-import { runQuery } from "../module/knowledge-graph/lib/graph-client";
+import { getPineconeIndex, ANTIBODY_NAMESPACE } from "../lib/pinecone";
+import { runQuery, closeGraphDriver } from "../module/knowledge-graph/lib/graph-client";
 import { writeNode } from "../module/knowledge-graph/lib/graph-writer";
 import { deleteBugFixKnowledge, runBugFixPipeline, type BugFixKnowledgeIds } from "../module/knowledge-graph/history/bug-fix-pipeline";
 import type { HistoricalPullRequest } from "../module/knowledge-graph/history/bug-classifier";
@@ -25,6 +26,15 @@ try {
     const result = await runBugFixPipeline(pr, dependencies);
     if (!result.classified || !result.ids) throw new Error(`Fixture PR #${pr.prNumber} was not persisted.`);
     created.push(result.ids);
+    let matched = false;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const vectors = await getPineconeIndex().namespace(ANTIBODY_NAMESPACE).fetch({ ids: [result.ids.antibodyId] });
+      matched = vectors.records[result.ids.antibodyId]?.metadata?.neo4jId === result.ids.antibodyId;
+      if (matched) break;
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    if (!matched) throw new Error("Pinecone antibody cross-reference did not become visible.");
+    console.log(`PASS: PR #${pr.prNumber} Pinecone record points to its exact Neo4j antibody ID.`);
     const check = await runQuery(`MATCH (a:Antibody {id: $antibody})-[:PROTECTS]->(i:Invariant) MATCH (a)-[:DERIVED_FROM]->(p:PullRequest {id: $pr}) MATCH (a)-[:WATCHES]->(s:Symbol {id: $symbol}) RETURN count(a) AS antibodies, count(i) AS invariants, count(p) AS prs, count(s) AS symbols`, { antibody: result.ids.antibodyId, pr: result.ids.pullRequestId, symbol: pr.symbolIds[0] });
     const row = check.records[0];
     if (!row || Number(row.get("antibodies")) !== 1 || Number(row.get("invariants")) !== 1 || Number(row.get("prs")) !== 1 || Number(row.get("symbols")) !== 1) throw new Error(`Fixture PR #${pr.prNumber} has incorrect links.`);
@@ -38,3 +48,5 @@ try {
   if (process.env.NEO4J_URI && process.env.NEO4J_USER && process.env.NEO4J_PASSWORD) await runQuery("MATCH (n) WHERE n.id STARTS WITH $prefix DETACH DELETE n", { prefix: repositoryId });
 }
 
+
+await closeGraphDriver();

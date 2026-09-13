@@ -1,0 +1,4 @@
+PASS: PR #101 Pinecone record points to its exact Neo4j antibody ID.
+PASS: PR #102 Pinecone record points to its exact Neo4j antibody ID.
+PASS: PR #103 Pinecone record points to its exact Neo4j antibody ID.
+PASS: 3 antibody/invariant fixtures verified.

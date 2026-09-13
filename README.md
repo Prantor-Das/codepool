@@ -396,16 +396,33 @@ The verification scripts require configured services. `verify:antibodies` uses d
 
 - A production-grade Sandbox Diff Engine/provider rollout is incomplete; the provider-neutral differential pipeline and Daytona adapter exist, but safe deployment still requires provider configuration and operational hardening.
 - The sandbox differential pipeline exists, but managed execution requires provider configuration; the default provider is intentionally unavailable.
-- Impact analysis has not been validated against a live Neo4j/Pinecone deployment in the current development environment.
+- Live graph ingestion, impact, antibody, and feedback verification results are recorded in `audit/`.
 - Import relationship resolution needs ordering and nested-module-resolution fixes.
 - Changed-symbol detection is currently best-effort regex parsing of the unified diff; body-only edits may not resolve to graph symbols.
 - Full history mining is API-expensive and lacks checkpoints/backoff.
 - Neo4j and Pinecone writes are not distributed-transactional; reconciliation is future work.
 - The UI does not yet display impact scores, graph evidence, antibody matches, or sandbox results.
-- Runtime feedback updates graph confidence/status but is not yet a complete reviewer-facing feedback UI.
+- Runtime feedback is available in the review detail dialog; one verdict per reviewer/antibody/PR is recorded.
 
 ## Development notes
 
 Read [HANDOFF.md](HANDOFF.md) before continuing architecture work. It records the verified git state, known bugs, service-blocked tests, recent commits, and the recommended next action.
 
 Do not use destructive git commands to discard existing work. Keep graph traversal bounded, preserve provenance fields, keep `Symbol` and `SymbolVersion` separate, and do not migrate existing PostgreSQL or source-code Pinecone data as part of memory/sandbox development.
+
+
+## Security and sandbox configuration
+
+See [the remediation audit](audit/REPORT.md) for findings, exact diffs and verification output.
+
+Daytona runs fail closed: outbound networking is blocked for the entire VM lifetime, including builds. Prepare a snapshot with Node, curl, Docker/Compose, dependency caches and all required images. Snapshot resource ceilings are 2 CPUs, 4 GiB RAM and 20 GiB disk. Automatic deletion caps VM lifetime at 45 minutes. Source archive bytes are fetched by the trusted control plane using the connected repository owner's GitHub account; no GitHub token or signed checkout URL enters the VM. Standalone verification may instead use short-lived, SHA-keyed archive manifests with SHA-256 digests.
+
+The target repository's Compose file must contain `app`, `postgres`, and `redis` services. Every service needs a numeric non-root `user`, `pids_limit` between 1 and 512, `cap_drop: [ALL]`, and `security_opt: [no-new-privileges:true]`. Host bind mounts, external volumes, host networking, devices, added capabilities and privileged containers/builds are rejected. Only VM-local Postgres and Redis are supported. Use non-root-compatible images and preinitialized writable volumes.
+
+Pass `DATABASE_URL`, `REDIS_URL`, and `CODEPOOL_EGRESS_URL` from the supplied Compose environment into the app. Set `extra_hosts: ["host.docker.internal:host-gateway"]` on the app. During sandbox runs the app's third-party HTTP adapter must POST a JSON `SandboxRequest` (`method`, absolute external `path`, optional `headers` and `body`) to `CODEPOOL_EGRESS_URL`; the response is a recorded `{status, headers, body}`. Configure `DAYTONA_REPLAY_CASSETTE` with frozen entries produced by `ReplayProxy.record` in a trusted recording environment. The replay service never falls back to live HTTP. Direct internet calls are blocked; cassette misses fail the run. Provider firewall state and replay counters are included in evidence; E5 is withheld without that attestation. These assertions verify policy state, not a packet-capture proof that no blocked attempts occurred.
+
+Set a deterministic SQL `SANDBOX_FIXTURE_SNAPSHOT`, its version, and a nonempty `SANDBOX_SCENARIOS_JSON` list before setting `SANDBOX_PROVIDER=daytona`. Each scenario has `id`, `method`, and an origin-relative `path`; default iterations are 20. Ordinary reviews continue independently of this optional execution setup.
+
+Human feedback status/confidence survives later extraction. False positives reject an antibody when its resulting confidence reaches 0.1 (with floating-point tolerance). Intentional changes supersede the antibody and its linked invariant. Rejected/superseded antibodies are excluded from graph and semantic retrieval. Invariant deduplication remains lexical, intentionally avoiding speculative semantic merges.
+
+Profile editing changes the display name only. Email changes are disabled until a verified email-change flow is configured, and implicit OAuth linking requires an already-verified local email. Existing authenticated users may use Better Auth's explicit account-linking flow.

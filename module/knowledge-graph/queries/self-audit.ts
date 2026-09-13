@@ -6,7 +6,7 @@ export type SelfAuditObservation = { suggestedPullRequestId: string; suggestedNu
 export async function getCodePoolSuggestionSelfAudit(repositoryId?: string): Promise<SelfAuditObservation[]> {
   const result = await runQuery(
     `MATCH (suggested:PullRequest {origin: 'codepool-suggested'})
-     WHERE $repositoryId IS NULL OR suggested.repositoryId = $repositoryId
+     WHERE $repositoryId IS NULL OR suggested.repositoryId = $repositoryId OR (suggested.repositoryId IS NULL AND suggested.id STARTS WITH $repositoryId + ":pr:")
      OPTIONAL MATCH (observation:IncidentObservation)-[:OBSERVED_ON]->(suggested)
      OPTIONAL MATCH (observation)-[:CONFIRMS]->(matched:Antibody)
      OPTIONAL MATCH (reverter:PullRequest)-[:REVERTED|REVERTS]->(suggested)

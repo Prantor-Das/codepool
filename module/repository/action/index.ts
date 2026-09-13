@@ -1,5 +1,7 @@
 "use server";
 
+import { Octokit } from "octokit";
+import { getGithubToken } from "@/module/github/lib/github";
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/src/prisma/db";
@@ -41,6 +43,12 @@ export async function connectedRepo(
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session) throw new Error("Unauthorized");
 
+  if (!/^[A-Za-z0-9_.-]+$/.test(owner) || !/^[A-Za-z0-9_.-]+$/.test(repo) || !Number.isSafeInteger(githubId) || githubId < 1) throw new Error("Invalid repository identity.");
+  const github = new Octokit({ auth: await getGithubToken() });
+  const { data: remote } = await github.rest.repos.get({ owner, repo });
+  if (remote.id !== githubId || !remote.permissions?.admin) throw new Error("Repository identity mismatch or administrator permission missing.");
+  owner = remote.owner.login;
+  repo = remote.name;
   const existing = await prisma.orm.public.Repository.where({
     githubId: BigInt(githubId),
   }).first();

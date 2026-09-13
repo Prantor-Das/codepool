@@ -1,9 +1,9 @@
 import { runQuery } from "../lib/graph-client";
 
-const constrainedLabels = [
-  "Repository", "Commit", "File", "Symbol", "SymbolVersion", "PullRequest",
-  "Issue", "Invariant", "Antibody", "Scenario", "ExecutionRun", "Observation", "IncidentObservation",
-] as const;
+import { graphLabels } from "../lib/graph-writer";
+
+// Every writable node has a deterministic id, including Bug and Endpoint.
+const constrainedLabels = graphLabels;
 
 const constraintStatements = constrainedLabels.map(
   (label) => `CREATE CONSTRAINT ${label.toLowerCase()}_id_unique IF NOT EXISTS FOR (n:${label}) REQUIRE n.id IS UNIQUE`,

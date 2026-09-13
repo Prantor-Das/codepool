@@ -12,7 +12,7 @@ export type ImpactSubgraph = {
   dataDependencies: Array<{ id: string; name?: string; distance: number }>;
 };
 
-const startMatch = "s.repositoryId = $repositoryId AND (s.id IN $changed OR s.name IN $changed)";
+const startMatch = "s.repositoryId = $repositoryId AND (s.id IN $changed OR s.name IN $changed OR s.filePath IN $changed)";
 const records = <T>(result: Awaited<ReturnType<typeof runQuery>>, map: (record: { get(key: string): unknown }) => T) => result.records.map(map);
 const value = (record: { get(key: string): unknown }, key: string) => record.get(key) as string | undefined;
 
@@ -25,27 +25,27 @@ export async function getBlastRadius(repositoryId: string, changed: string[]): P
   const params = { repositoryId, changed };
   const [changedResult, callersResult, reachableResult, antibodyResult, endpointResult, scenarioResult, dataResult] = await Promise.all([
     runQuery(`MATCH (s:Symbol) WHERE ${startMatch} RETURN DISTINCT s.id AS id, s.name AS name`, params),
-    runQuery(`MATCH (changed:Symbol) WHERE ${startMatch} MATCH path=(caller:Symbol)-[:CALLS*1..4]->(changed) RETURN caller.id AS id, caller.name AS name, min(length(path)) AS distance`, params),
-    runQuery(`MATCH (changed:Symbol) WHERE ${startMatch}
+    runQuery(`MATCH (changed:Symbol) WHERE ${startMatch.replaceAll("s.", "changed.")} MATCH path=(caller:Symbol)-[:CALLS*1..4]->(changed) RETURN caller.id AS id, caller.name AS name, min(length(path)) AS distance`, params),
+    runQuery(`MATCH (changed:Symbol) WHERE ${startMatch.replaceAll("s.", "changed.")}
       CALL { WITH changed MATCH path=(changed)-[:CALLS*0..4]-(reachable:Symbol) RETURN reachable, min(length(path)) AS distance
              UNION WITH changed MATCH path=(changed)-[:IMPORTS*1..3]-(reachable:Symbol) RETURN reachable, min(length(path)) AS distance }
       RETURN DISTINCT reachable.id AS id, reachable.name AS name, min(distance) AS distance`, params),
-    runQuery(`MATCH (changed:Symbol) WHERE ${startMatch}
+    runQuery(`MATCH (changed:Symbol) WHERE ${startMatch.replaceAll("s.", "changed.")}
       CALL { WITH changed MATCH path=(changed)-[:CALLS*0..4]-(reachable:Symbol) RETURN reachable, min(length(path)) AS distance
              UNION WITH changed MATCH path=(changed)-[:IMPORTS*1..3]-(reachable:Symbol) RETURN reachable, min(length(path)) AS distance }
-      MATCH (antibody:Antibody)-[:WATCHES]->(reachable) OPTIONAL MATCH (antibody)-[:PROTECTS]->(invariant:Invariant)
+      MATCH (antibody:Antibody)-[:WATCHES]->(reachable) WHERE NOT coalesce(antibody.status, '') IN ['rejected', 'superseded'] OPTIONAL MATCH (antibody)-[:PROTECTS]->(invariant:Invariant)
       RETURN DISTINCT antibody.id AS id, antibody.problem AS problem, invariant.statement AS invariant, reachable.id AS watchedSymbolId, min(distance) AS distance`, params),
-    runQuery(`MATCH (changed:Symbol) WHERE ${startMatch}
+    runQuery(`MATCH (changed:Symbol) WHERE ${startMatch.replaceAll("s.", "changed.")}
       CALL { WITH changed MATCH (changed)-[:CALLS*0..4]-(reachable:Symbol) RETURN DISTINCT reachable
              UNION WITH changed MATCH (changed)-[:IMPORTS*1..3]-(reachable:Symbol) RETURN DISTINCT reachable }
       MATCH (reachable)-[:SERVES]->(endpoint:Endpoint)
       RETURN DISTINCT endpoint.id AS id, endpoint.path AS path, endpoint.method AS method, reachable.id AS symbolId`, params),
-    runQuery(`MATCH (changed:Symbol) WHERE ${startMatch}
+    runQuery(`MATCH (changed:Symbol) WHERE ${startMatch.replaceAll("s.", "changed.")}
       CALL { WITH changed MATCH (changed)-[:CALLS*0..4]-(reachable:Symbol) RETURN DISTINCT reachable
              UNION WITH changed MATCH (changed)-[:IMPORTS*1..3]-(reachable:Symbol) RETURN DISTINCT reachable }
       MATCH (reachable)<-[:TOUCHES]-(scenario:Scenario)
       RETURN DISTINCT scenario.id AS id, scenario.name AS name, reachable.id AS symbolId`, params),
-    runQuery(`MATCH (changed:Symbol) WHERE ${startMatch}
+    runQuery(`MATCH (changed:Symbol) WHERE ${startMatch.replaceAll("s.", "changed.")}
       MATCH path=(changed)-[:READS|WRITES*1..2]-(entity:DatabaseEntity)
       RETURN DISTINCT entity.id AS id, entity.name AS name, min(length(path)) AS distance`, params),
   ]);

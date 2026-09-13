@@ -1,0 +1,3 @@
+PASS: known function symbols — expected add and total
+PASS: distinct content versions — add changes once; total does not
+PASS: CALLS relationship — total calls add

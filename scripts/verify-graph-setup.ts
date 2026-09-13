@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { runQuery } from "../module/knowledge-graph/lib/graph-client";
+import { runQuery, closeGraphDriver } from "../module/knowledge-graph/lib/graph-client";
 import { writeNode, writeRelationship } from "../module/knowledge-graph/lib/graph-writer";
 import { initializeGraphSchema } from "../module/knowledge-graph/schema/constraints";
 
@@ -52,3 +52,5 @@ try {
     }
   }
 }
+
+await closeGraphDriver();

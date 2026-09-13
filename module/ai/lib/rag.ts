@@ -1,4 +1,5 @@
-import { getPineconeIndex } from "@/lib/pinecone";
+import { runQuery } from "@/module/knowledge-graph/lib/graph-client";
+import { getPineconeIndex, ANTIBODY_NAMESPACE } from "@/lib/pinecone";
 
 const PINECONE_TEXT_FIELD = process.env.PINECONE_TEXT_FIELD ?? "text";
 const EMBEDDING_BATCH_SIZE = 64;
@@ -99,4 +100,15 @@ export async function retrieveContext(
       return fields[PINECONE_TEXT_FIELD] as string | undefined;
     })
     .filter((content): content is string => Boolean(content));
+}
+
+/** Hydrate vector hits through the authoritative graph so rejected antibodies stay excluded. */
+export async function retrieveAntibodyContext(query: string, repositoryId: string): Promise<string[]> {
+  const result = await getPineconeIndex().namespace(ANTIBODY_NAMESPACE).searchRecords({ query: { inputs: { text: query }, filter: { repositoryId }, topK: 5 }, fields: ["neo4jId"] });
+  const ids = result.result.hits.map(hit => (hit.fields as Record<string, unknown>).neo4jId).filter((id): id is string => typeof id === "string");
+  if (!ids.length) return [];
+  const graph = await runQuery(`MATCH (a:Antibody) WHERE a.id IN $ids AND NOT coalesce(a.status, '') IN ['rejected', 'superseded']
+    MATCH (a)-[:DERIVED_FROM]->(p:PullRequest {repositoryId: $repositoryId})
+    RETURN DISTINCT a.problem AS problem, a.rootCause AS rootCause`, { ids, repositoryId });
+  return graph.records.map(r => `Historical antibody: ${r.get("problem")}\nRoot cause: ${r.get("rootCause")}`);
 }
