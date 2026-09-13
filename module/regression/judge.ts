@@ -1,7 +1,7 @@
 import { retrieveContext } from "@/module/ai/lib/rag";
 import { getBlastRadius, type ImpactSubgraph } from "@/module/knowledge-graph/impact/blast-radius";
 import { getHistoricalImpact, type HistoricalImpact } from "@/module/knowledge-graph/impact/historical-impact";
-import { computeImpactScore, SANDBOX_TRIGGER_SCORE } from "./risk-score";
+import { computeImpactScore } from "./risk-score";
 
 export type RegressionJudgeContext = ImpactSubgraph & {
   historical: HistoricalImpact[];
@@ -9,7 +9,14 @@ export type RegressionJudgeContext = ImpactSubgraph & {
   changedIdentifiers: string[];
   impactScore: number;
   riskTier: "standard-review" | "sandbox-diff-engine";
+  resurrectionDetected: boolean;
+  apiEndpointAdjacent: boolean;
+  judgeConfidence?: number;
 };
+
+export function shouldTriggerSandboxDiff(input: Pick<RegressionJudgeContext, "resurrectionDetected" | "apiEndpointAdjacent"> & { confidence?: number; explicitFullVerification?: boolean }): boolean {
+  return input.resurrectionDetected || input.apiEndpointAdjacent || input.explicitFullVerification === true || (typeof input.confidence === "number" && input.confidence >= .4 && input.confidence <= .9);
+}
 
 /** Best-effort changed declaration names from a unified diff; graph lookup accepts names or ids. */
 export function changedIdentifiersFromDiff(diff: string) {
@@ -22,7 +29,7 @@ export function changedIdentifiersFromDiff(diff: string) {
   return [...names];
 }
 
-export async function buildRegressionJudgeContext(input: { repositoryId: string; repoSlug: string; title: string; description?: string | null; diff: string }): Promise<RegressionJudgeContext> {
+export async function buildRegressionJudgeContext(input: { repositoryId: string; repoSlug: string; title: string; description?: string | null; diff: string; judgeConfidence?: number; explicitFullVerification?: boolean }): Promise<RegressionJudgeContext> {
   const changedIdentifiers = changedIdentifiersFromDiff(input.diff);
   const semanticPromise = retrieveContext(`${input.title}\n${input.description ?? ""}\n${changedIdentifiers.join(" ")}`, input.repoSlug);
   // Graph availability is an enhancement: a missing Neo4j configuration must not block ordinary review.
@@ -33,5 +40,7 @@ export async function buildRegressionJudgeContext(input: { repositoryId: string;
   const semanticContext = await semanticPromise.catch(() => [] as string[]);
   const changeMagnitude = Math.min(1, input.diff.split("\n").filter((line) => line.startsWith("+") || line.startsWith("-")).length / 100);
   const impactScore = computeImpactScore({ ...graph[0], historical: graph[1], changeMagnitude });
-  return { ...graph[0], historical: graph[1], semanticContext, changedIdentifiers, impactScore, riskTier: impactScore >= SANDBOX_TRIGGER_SCORE || graph[1].length > 0 ? "sandbox-diff-engine" : "standard-review" };
+  const resurrectionDetected = graph[1].length > 0;
+  const apiEndpointAdjacent = graph[0].endpoints.length > 0;
+  return { ...graph[0], historical: graph[1], semanticContext, changedIdentifiers, impactScore, resurrectionDetected, apiEndpointAdjacent, judgeConfidence: input.judgeConfidence, riskTier: shouldTriggerSandboxDiff({ confidence: input.judgeConfidence, explicitFullVerification: input.explicitFullVerification, resurrectionDetected, apiEndpointAdjacent }) ? "sandbox-diff-engine" : "standard-review" };
 }

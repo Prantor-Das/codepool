@@ -19,6 +19,7 @@ import {
   getRepoFileContents,
   updateReviewCheckRun,
 } from "@/module/github/lib/github";
+export { buildSandbox, publishDifferentialEvidenceComment, requestDifferentialRun, runDifferential } from "./sandbox";
 
 type GraphRepositoryEvent = { repositoryId: string; owner: string; repo: string; userId: string };
 

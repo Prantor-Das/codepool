@@ -2,7 +2,7 @@ import { runQuery } from "../lib/graph-client";
 
 const constrainedLabels = [
   "Repository", "Commit", "File", "Symbol", "SymbolVersion", "PullRequest",
-  "Issue", "Invariant", "Antibody", "Scenario", "ExecutionRun", "Observation",
+  "Issue", "Invariant", "Antibody", "Scenario", "ExecutionRun", "Observation", "IncidentObservation",
 ] as const;
 
 const constraintStatements = constrainedLabels.map(
@@ -15,4 +15,3 @@ export async function initializeGraphSchema(): Promise<void> {
 }
 
 export { constrainedLabels, constraintStatements };
-

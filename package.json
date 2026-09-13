@@ -21,12 +21,16 @@
     "verify:graph": "bun scripts/verify-graph-setup.ts",
     "verify:ingestion": "bun scripts/verify-ingestion.ts",
     "verify:antibodies": "bun scripts/verify-antibodies.ts",
-    "verify:impact": "bun scripts/verify-impact.ts"
+    "verify:impact": "bun scripts/verify-impact.ts",
+    "verify:sandbox-diff": "bun scripts/verify-sandbox-diff.ts",
+    "verify:daytona": "bun scripts/verify-daytona-provisioner.ts",
+    "verify:evidence-loop": "bun scripts/verify-evidence-loop.ts"
   },
   "dependencies": {
     "@ai-sdk/google": "^4.0.69",
     "@base-ui/react": "^1.8.0",
     "@better-auth/kysely-adapter": "^1.7.4",
+    "@daytonaio/sdk": "^0.211.2",
     "@pinecone-database/pinecone": "^9.0.0",
     "@prisma/orm-postgres": "^8.0.0-rc.9",
     "@shadcn/react": "^0.3.1",
@@ -57,8 +61,8 @@
     "react-resizable-panels": "^4.12.4",
     "recharts": "3.8.0",
     "shadcn": "^4.21.0",
-    "ts-morph": "^26.0.0",
     "temporal-polyfill": "^0.2.5",
+    "ts-morph": "^26.0.0",
     "tw-animate-css": "^1.4.0"
   },
   "devDependencies": {

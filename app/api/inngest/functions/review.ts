@@ -65,7 +65,7 @@ export const generateReview = inngest.createFunction(
       const account = await step.run("load-github-account-for-check", () => prisma.orm.public.Account.where({ userId, providerId: "github" }).first());
       if (!account?.accessToken) throw new Error("No GitHub access token found");
       if (typeof checkRunId === "number") await step.run("mark-check-in-progress", () => updateReviewCheckRun(account.accessToken!, owner, repo, checkRunId, "in_progress"));
-      const { diff, title, description, token } = await step.run(
+      const { diff, title, description, token, baseSha, headSha, labels } = await step.run(
       "fetch-pr-data",
       async () => {
         const account = await prisma.orm.public.Account.where({
@@ -88,8 +88,26 @@ export const generateReview = inngest.createFunction(
     );
 
       const context = await step.run("build-regression-judge-context", () =>
-        buildRegressionJudgeContext({ repositoryId, repoSlug: `${owner}/${repo}`, title, description, diff }),
+        buildRegressionJudgeContext({ repositoryId, repoSlug: `${owner}/${repo}`, title, description, diff, explicitFullVerification: labels?.includes("full-verification") === true }),
       );
+
+      if (context.riskTier === "sandbox-diff-engine" && process.env.SANDBOX_FIXTURE_SNAPSHOT) {
+        await step.run("request-targeted-sandbox-differential-run", () => inngest.send({
+          name: "sandbox.build.requested",
+          data: {
+            repositoryId,
+            pullRequestId: `${repositoryId}:pr:${prNumber}`,
+            baseSha,
+            prSha: headSha,
+            fixture: process.env.SANDBOX_FIXTURE_SNAPSHOT,
+            fixtureVersion: process.env.SANDBOX_FIXTURE_VERSION ?? "configured",
+            runId: `${repositoryId}:${prNumber}:${headSha}`,
+            explicitFullVerification: labels?.includes("full-verification") === true,
+            owner, repo, prNumber, userId,
+            judgeContext: context,
+          },
+        }));
+      }
 
       const review = await step.run("generate-ai-review", async () => {
         const prompt = `You are a senior engineer reviewing a pull request. Produce a concise, high-signal review that is useful to the author and safe to act on.

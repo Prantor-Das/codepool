@@ -471,6 +471,9 @@ export async function getPullRequestDiff(
     diff: diff as unknown as string,
     title: pr.title,
     description: pr.body,
+    baseSha: pr.base.sha,
+    headSha: pr.head.sha,
+    labels: pr.labels.map((label) => typeof label === "string" ? label : label.name).filter((label): label is string => Boolean(label)),
   };
 }
 
@@ -513,4 +516,15 @@ export async function createReviewCheckRun(token: string, owner: string, repo: s
 export async function updateReviewCheckRun(token: string, owner: string, repo: string, checkRunId: number, state: "in_progress" | "completed", conclusion?: "success" | "failure" | "timed_out", summary?: string) {
   const octokit = new Octokit({ auth: token });
   await octokit.rest.checks.update({ owner, repo, check_run_id: checkRunId, ...reviewCheckRunPayload(state, conclusion, summary) });
+}
+
+export async function postRuntimeDiffComment(token: string, owner: string, repo: string, prNumber: number, body: string) {
+  const octokit = new Octokit({ auth: token });
+  const { data } = await octokit.rest.issues.createComment({ owner, repo, issue_number: prNumber, body: `${body}\n\n*Powered by Codepool*` });
+  return data;
+}
+
+export async function addRuntimeFeedbackReaction(token: string, owner: string, repo: string, commentId: number, content: "+1" | "rocket" | "-1") {
+  const octokit = new Octokit({ auth: token });
+  return octokit.rest.reactions.createForIssueComment({ owner, repo, comment_id: commentId, content });
 }
