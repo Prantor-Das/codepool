@@ -11,11 +11,20 @@ type ConnectedRepository = {
 type OpenPullRequest = {
   number: number;
   updated_at: string;
+  head: { sha: string };
+};
+
+type ReviewSnapshot = {
+  status: string;
+  updatedAt: { epochMilliseconds: number };
+  review: string;
 };
 import { prisma } from "@/src/prisma/db";
 import { indexCodeBase } from "@/module/ai/lib/rag";
 import {
   getOpenPullRequests,
+  getGithubTokenForUser,
+  getPullRequestChangedFileContents,
   getRepoFileContents,
   isGithubAuthenticationError,
   updateReviewCheckRun,
@@ -27,7 +36,7 @@ type GraphRepositoryEvent = { repositoryId: string; owner: string; repo: string;
 async function graphTarget(event: GraphRepositoryEvent) {
   const account = await prisma.orm.public.Account.where({ userId: event.userId, providerId: "github" }).first();
   if (!account?.accessToken) throw new Error("No GitHub access token found for graph ingestion");
-  return { repositoryId: event.repositoryId, owner: event.owner, repo: event.repo, token: account.accessToken };
+  return { repositoryId: event.repositoryId, owner: event.owner, repo: event.repo, token: await getGithubTokenForUser(event.userId) };
 }
 
 export const syncRepositoryHistory = inngest.createFunction(
@@ -47,6 +56,25 @@ export const ingestMergedPullRequestGraph = inngest.createFunction(
     const data = event.data as GraphRepositoryEvent & { sha: string; prNumber: number; url?: string; codepoolSuggested?: boolean };
     return ingestMergedPullRequest(await graphTarget(data), data);
   }),
+);
+
+/** Refresh Pinecone with the files introduced by a merged pull request. */
+export const indexMergedPullRequest = inngest.createFunction(
+  { id: "index-merged-pull-request", triggers: [{ event: "pull_request.merged" }] },
+  async ({ event, step }) => {
+    const data = event.data as GraphRepositoryEvent & { sha: string; prNumber: number };
+    const result = await step.run("index-merged-files", async () => {
+      const files = await getPullRequestChangedFileContents(
+        await getGithubTokenForUser(data.userId),
+        data.owner,
+        data.repo,
+        data.prNumber,
+        data.sha,
+      );
+      return indexCodeBase(`${data.owner}/${data.repo}`, files);
+    });
+    return result;
+  },
 );
 
 export const helloWorld = inngest.createFunction(
@@ -76,7 +104,7 @@ export const indexRepo = inngest.createFunction(
         throw new Error("No github acces token found");
       }
 
-      const files = await getRepoFileContents(account.accessToken, owner, repo);
+      const files = await getRepoFileContents(await getGithubTokenForUser(userId), owner, repo);
       const result = await indexCodeBase(`${owner}/${repo}`, files);
 
       return result;
@@ -93,7 +121,8 @@ export const indexRepo = inngest.createFunction(
 export const pollRepositories = inngest.createFunction(
   {
     id: "poll-repositories-for-reviews",
-    // Webhooks are the primary trigger; this catches missed deliveries.
+    // Webhooks are the primary trigger; reconciliation catches missed
+    // deliveries (for example while a local tunnel URL is changing).
     triggers: [{ cron: "*/2 * * * *" }],
   },
   async ({ step }) => {
@@ -122,9 +151,9 @@ export const pollRepositories = inngest.createFunction(
       try {
         pullRequests = (await step.run(
           `load-open-pull-requests-${repository.id}`,
-          () =>
+          async () =>
             getOpenPullRequests(
-              account.accessToken!,
+              await getGithubTokenForUser(repository.userId),
               repository.owner,
               repository.name,
             ),
@@ -152,12 +181,12 @@ export const pollRepositories = inngest.createFunction(
       }
 
       for (const pullRequest of pullRequests) {
-        const existingReviews = await prisma.orm.public.Review.where({
+        const existingReviews = (await prisma.orm.public.Review.where({
           repositoryId: repository.id,
           prNumber: pullRequest.number,
         })
-          .select("status", "updatedAt")
-          .all();
+          .select("status", "updatedAt", "review")
+          .all()) as unknown as ReviewSnapshot[];
         const latestReview = existingReviews
           .slice()
           .sort(
@@ -165,13 +194,26 @@ export const pollRepositories = inngest.createFunction(
               right.updatedAt.epochMilliseconds - left.updatedAt.epochMilliseconds,
           )[0];
 
-        // Re-queue the same PR when GitHub reports a newer commit/update.
-        if (
-          latestReview &&
-          latestReview.updatedAt.epochMilliseconds >=
-            new Date(pullRequest.updated_at).getTime()
-        ) {
-          continue;
+        if (latestReview) {
+          let reviewedHeadSha: string | undefined;
+          try {
+            const marker = JSON.parse(latestReview.review) as { headSha?: unknown };
+            if (typeof marker.headSha === "string") reviewedHeadSha = marker.headSha;
+          } catch {
+            // Legacy reviews used plain text or model JSON without a SHA.
+          }
+
+          // The commit SHA is the durable de-duplication key. A cron tick may
+          // run forever, but it must not spend tokens reviewing the same head.
+          if (reviewedHeadSha === pullRequest.head.sha) continue;
+
+          // Preserve the old timestamp fallback for reviews created before the
+          // SHA marker was introduced.
+          if (
+            !reviewedHeadSha &&
+            latestReview.updatedAt.epochMilliseconds >=
+              new Date(pullRequest.updated_at).getTime()
+          ) continue;
         }
 
         await inngest.send({
@@ -182,6 +224,7 @@ export const pollRepositories = inngest.createFunction(
             repo: repository.name,
             prNumber: pullRequest.number,
             userId: repository.userId,
+            headSha: pullRequest.head.sha,
           },
         });
         queued += 1;
@@ -205,8 +248,9 @@ export const expireStaleReviewChecks = inngest.createFunction(
       const repository = await prisma.orm.public.Repository.where({ id: review.repositoryId }).first();
       const account = repository && await prisma.orm.public.Account.where({ userId: repository.userId, providerId: "github" }).first();
       if (!repository || !account?.accessToken) continue;
-      await step.run(`mark-stale-check-${review.id}`, async () => {
-        await updateReviewCheckRun(account.accessToken!, repository.owner, repository.name, marker!.checkRunId!, "completed", "timed_out", "Review processing exceeded 30 minutes. Please retry the review.");
+      await step.run(`mark-stale-review-${review.id}`, async () => {
+        // Legacy rows may contain a check-run marker, but OAuth tokens cannot
+        // update Checks API runs. The database status is the source of truth.
         await prisma.orm.public.Review.where({ id: review.id }).update({ status: "failed", review: "Review processing timed out. Please retry the pull request review." });
       });
       expired += 1;

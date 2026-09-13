@@ -1,7 +1,8 @@
 import {
+  getGithubTokenForUser,
   getPullRequestDiff,
   postReviewComment,
-  updateReviewCheckRun,
+  upsertReviewStatusComment,
 } from "@/module/github/lib/github";
 import { resolveLocalSandboxConfig, resolveRepositorySandboxConfig } from "@/module/execution/config/repository-sandbox";
 import { buildRegressionJudgeContext } from "@/module/regression/judge";
@@ -28,15 +29,28 @@ export const generateReview = inngest.createFunction(
   {
     id: "generate-review",
     concurrency: 5,
+    idempotency: "event.data.repositoryId + ':' + event.data.prNumber + ':' + event.data.headSha",
     triggers: [{ event: "pr.review.requested" }],
   },
   // jbnj
 
   async ({ event, step }) => {
-    const { owner, repo, prNumber, userId, repositoryId, checkRunId } = event.data;
+    const { owner, repo, prNumber, userId, repositoryId } = event.data;
+    let reviewHeadSha = event.data.headSha;
 
     const reviewUrl = `https://github.com/${owner}/${repo}/pull/${prNumber}`;
     const reviewRecordId = await step.run("initialize-review", async () => {
+      const repository = await prisma.orm.public.Repository.where({ id: repositoryId }).first();
+      if (!repository) {
+        throw new NonRetriableError(
+          `Cannot start review for ${owner}/${repo}#${prNumber}: repository ${repositoryId} no longer exists.`,
+        );
+      }
+      if (repository.userId !== userId) {
+        throw new NonRetriableError(
+          `Cannot start review for ${owner}/${repo}#${prNumber}: repository ownership does not match the event.`,
+        );
+      }
       const existing = await prisma.orm.public.Review.where({
         repositoryId,
         prNumber,
@@ -56,7 +70,7 @@ export const generateReview = inngest.createFunction(
         prNumber,
         prTitle: "Review in progress…",
         prUrl: reviewUrl,
-          review: JSON.stringify({ kind: "check-run", checkRunId, queuedAt: new Date().toISOString() }),
+          review: JSON.stringify({ kind: "review", headSha: event.data.headSha, queuedAt: new Date().toISOString() }),
         status: "pending",
       });
       return created.id;
@@ -65,32 +79,49 @@ export const generateReview = inngest.createFunction(
     try {
       const account = await step.run("load-github-account-for-check", () => prisma.orm.public.Account.where({ userId, providerId: "github" }).first());
       if (!account?.accessToken) throw new Error("No GitHub access token found");
-      if (typeof checkRunId === "number") await step.run("mark-check-in-progress", () => updateReviewCheckRun(account.accessToken!, owner, repo, checkRunId, "in_progress"));
-      const { diff, title, description, token, baseSha, headSha, labels, sandboxConfig } = await step.run(
+      const githubToken = await getGithubTokenForUser(userId);
+      if (typeof reviewHeadSha !== "string") {
+        reviewHeadSha = await step.run("resolve-review-head-sha", async () => {
+          const data = await getPullRequestDiff(githubToken, owner, repo, prNumber);
+          return data.headSha;
+        });
+      }
+      // GitHub's Checks API only accepts GitHub App authentication. OAuth
+      // tokens used by Codepool cannot create check runs, so the issue comment
+      // below is the portable progress indicator.
+      await step.run("record-review-head", async () => {
+        const current = await prisma.orm.public.Review.where({ id: reviewRecordId }).first();
+        if (!current) return;
+        let payload: Record<string, unknown> = {};
+        try { payload = JSON.parse(current.review) as Record<string, unknown>; } catch { /* replace legacy marker */ }
+        await prisma.orm.public.Review.where({ id: reviewRecordId }).update({
+          review: JSON.stringify({ ...payload, kind: "review", headSha: reviewHeadSha, queuedAt: new Date().toISOString() }),
+        });
+      });
+      await step.run("post-review-status", async () => {
+        try {
+          return await upsertReviewStatusComment(githubToken, owner, repo, prNumber, "in_progress", reviewHeadSha);
+        } catch (error) {
+          console.warn("Could not update review status comment; continuing review:", error);
+          return null;
+        }
+      });
+      const { diff, title, description, baseSha, headSha, labels, sandboxConfig } = await step.run(
       "fetch-pr-data",
       async () => {
-        const account = await prisma.orm.public.Account.where({
-          userId,
-          providerId: "github",
-        }).first();
-
-        if (!account?.accessToken) {
-          throw new Error("No GitHub access token found");
-        }
-
         const data = await getPullRequestDiff(
-          account.accessToken,
+          githubToken,
           owner,
           repo,
           prNumber,
         );
         let sandboxConfig = null;
         try {
-          sandboxConfig = await resolveRepositorySandboxConfig(account.accessToken, owner, repo, data.baseSha);
+          sandboxConfig = await resolveRepositorySandboxConfig(githubToken, owner, repo, data.baseSha);
         } catch (error) {
           console.warn("Ignoring invalid repository sandbox manifest; sandbox execution is fail-closed.", error);
         }
-        return { ...data, token: account.accessToken, sandboxConfig };
+        return { ...data, sandboxConfig };
       },
     );
 
@@ -100,7 +131,11 @@ export const generateReview = inngest.createFunction(
 
       const localSandboxConfig = await step.run("resolve-local-sandbox-fallback", () => resolveLocalSandboxConfig());
       const configuredSandbox = sandboxConfig ?? localSandboxConfig;
-      if (context.riskTier === "sandbox-diff-engine" && configuredSandbox) {
+      // When a repository opts into a sandbox manifest, always run the base
+      // and PR revisions so performanceComparison is measured rather than
+      // guessed by the language model. Risk routing still controls the review
+      // context, but no longer suppresses the requested differential run.
+      if (configuredSandbox) {
         await step.run("request-targeted-sandbox-differential-run", () => inngest.send({
           name: "sandbox.build.requested",
           data: {
@@ -133,6 +168,8 @@ ${JSON.stringify(context, null, 2)}
 
 Risk routing: ${context.riskTier}. A sandbox-diff-engine tier is a regression-risk signal; do not claim a runtime failure without evidence in the diff/context.
 
+Sandbox execution status: ${configuredSandbox ? "A differential sandbox run was requested for this pull request; measured latency will arrive in a follow-up runtime evidence comment." : "No differential sandbox run was configured or requested for this pull request; do not invent p50/p99 measurements."}
+
 Pull request diff:
 \`\`\`diff
 ${diff}
@@ -140,10 +177,13 @@ ${diff}
 
 Populate the response schema as follows:
 - walkthrough: Explain the changed behavior by file, including important control or data flow. Keep it factual and brief.
+- sequenceDiagram: Valid Mermaid sequenceDiagram source showing the main user, browser/client, changed server modules, data stores, and external services involved in the changed flow. Use only participants and interactions supported by the diff. Return the diagram source without Markdown fences.
 - summary: State the overall intent and risk level of this change in two or three sentences.
 - strengths: List only concrete, observable positives from the diff. Use an empty array when none are meaningful.
 - issues: Include only actionable defects or material risks. Use severity critical/high/medium/low/info accurately. Leave empty when the change is sound.
-- suggestions: Include lower-risk, actionable improvements that are directly related to the changed code. Do not duplicate issues.
+- suggestions: Include 1-3 concrete, actionable improvements directly related to the changed code. Each suggestion must be grounded in the diff, point to an exact changed line, and include a useful implementation prompt. Do not duplicate issues. If no safe improvement exists, return an empty array and explain that in performanceComparison.
+- performanceComparison: Return the literal placeholder PENDING_MEASURED_SANDBOX_COMPARISON. The application replaces this field with measured base-versus-PR sandbox p50/p99 results after the two environments finish. Never invent timings.
+- masterPrompt: A single self-contained implementation prompt that combines every issue and suggestion, names exact files and line ranges, requires tests, and tells an AI coding agent how to solve the complete review. If there are no findings, provide a concise prompt to validate the change and run relevant tests.
 
 For every issue and suggestion:
 - file must be an exact path present in the diff; lineStart and lineEnd must identify changed lines, or the closest changed lines that introduce the concern.
@@ -151,15 +191,23 @@ For every issue and suggestion:
 - fixPrompt must be self-contained and imperative. It must start by naming file:lineStart-lineEnd, state the problem in one sentence, then state the required code change and any validation/test to add. It must be ready to paste into an AI coding agent without this review.
 - If the evidence is insufficient to specify an exact file and line range, omit the finding rather than guessing.
 
+The response is incomplete unless it includes sequenceDiagram, performanceComparison, and masterPrompt. Do not return prose headings instead of these JSON fields.
+
 Return only valid JSON that conforms exactly to the supplied schema. Do not use Markdown, code fences, or prose outside that JSON.`;
 
-        return await generateModelReview(prompt);
+        const generated = await generateModelReview(prompt);
+        return {
+          ...generated,
+          performanceComparison: configuredSandbox
+            ? "Measured sandbox comparison is running for the base and PR revisions. The p50/p99 latency report will be attached when both environments complete."
+            : "No repository sandbox configuration was available, so no measured performance comparison was run.",
+        };
       });
 
       const reviewMarkdown = reviewOutputToMarkdown(review);
 
       await step.run("post-comment", async () => {
-        await postReviewComment(token, owner, repo, prNumber, reviewMarkdown);
+        await postReviewComment(githubToken, owner, repo, prNumber, reviewMarkdown);
       });
 
       await step.run("save-review", async () => {
@@ -168,18 +216,46 @@ Return only valid JSON that conforms exactly to the supplied schema. Do not use 
         }).first();
         if (!existing) throw new Error("Review record was not initialized");
 
+        // The sandbox worker may finish before this AI step. Preserve its
+        // measured report instead of replacing it with the initial pending
+        // placeholder.
+        let resolvedReview = { ...review, headSha: reviewHeadSha };
+        try {
+          const prior = JSON.parse(existing.review) as { performanceComparison?: unknown };
+          if (
+            typeof prior.performanceComparison === "string" &&
+            prior.performanceComparison.trim() &&
+            !prior.performanceComparison.includes("sandbox comparison is running")
+          ) {
+            resolvedReview = {
+              ...review,
+              headSha: reviewHeadSha,
+              performanceComparison: prior.performanceComparison,
+            };
+          }
+        } catch {
+          // Legacy queued review payloads are replaced by the new review.
+        }
+
         await prisma.orm.public.Review.where({ id: reviewRecordId }).update({
           prNumber,
           prTitle: title,
           prUrl: reviewUrl,
-          review: JSON.stringify(review),
+          review: JSON.stringify(resolvedReview),
           status: "completed",
         });
 
         return { saved: true };
       });
 
-      if (typeof checkRunId === "number") await step.run("mark-check-completed", () => updateReviewCheckRun(account.accessToken!, owner, repo, checkRunId, "completed", "success", "The AI review was generated successfully."));
+      await step.run("post-review-completed-status", async () => {
+        try {
+          return await upsertReviewStatusComment(githubToken, owner, repo, prNumber, "completed", headSha);
+        } catch (error) {
+          console.warn("Could not update completed review status comment:", error);
+          return null;
+        }
+      });
 
       return { success: true };
     } catch (error) {
@@ -195,7 +271,10 @@ Return only valid JSON that conforms exactly to the supplied schema. Do not use 
 
       try {
         const account = await prisma.orm.public.Account.where({ userId, providerId: "github" }).first();
-        if (account?.accessToken && typeof checkRunId === "number") await updateReviewCheckRun(account.accessToken, owner, repo, checkRunId, "completed", "failure", message);
+        if (account?.accessToken) {
+          const githubToken = await getGithubTokenForUser(userId);
+          await upsertReviewStatusComment(githubToken, owner, repo, prNumber, "failed");
+        }
       } catch (checkError) { console.error("Failed to update review check run:", checkError); }
 
       if (isPermanentModelScopeAuthError(error)) {

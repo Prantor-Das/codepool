@@ -92,18 +92,27 @@ export async function connectedRepo(
 
   let queued = false;
   try {
-    await inngest.send({
-      name: "repository.connected",
-      data: { owner, repo, userId: session.user.id },
-    });
-    await inngest.send({
-      name: "repository.sync.requested",
-      data: { repositoryId: repository.id, owner, repo, userId: session.user.id },
-    });
+    // Pinecone indexing and graph construction are independent jobs. Dispatch
+    // both together so neither waits for the other to finish.
+    await Promise.all([
+      inngest.send({
+        name: "repository.connected",
+        data: { owner, repo, userId: session.user.id },
+      }),
+      inngest.send({
+        name: "repository.graph.build.requested",
+        data: {
+          repositoryId: repository.id,
+          owner,
+          repo,
+          userId: session.user.id,
+        },
+      }),
+    ]);
     queued = true;
   } catch (error) {
     console.error(
-      "Repository connected, but indexing could not be queued:",
+      "Repository connected, but background indexing/graph jobs could not be queued:",
       error,
     );
   }

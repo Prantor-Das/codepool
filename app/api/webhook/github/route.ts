@@ -2,7 +2,6 @@ import { readBoundedBody, BodyTooLargeError } from "@/lib/http-body";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { inngest } from "@/inngest/client";
 import { prisma } from "@/src/prisma/db";
-import { createReviewCheckRun } from "@/module/github/lib/github";
 import { NextResponse, NextRequest } from "next/server";
 
 function verifySignature(rawBody: Buffer, signature: string | null) {
@@ -121,22 +120,12 @@ export async function POST(req: NextRequest) {
         if (!repository) {
           throw new Error(`Repository is not connected: ${repo}`);
         }
-        const account = await prisma.orm.public.Account.where({ userId: repository.userId, providerId: "github" }).first();
-        if (!account?.accessToken) throw new Error("No GitHub access token found for repository owner");
         const headSha = body.pull_request?.head?.sha;
         if (typeof headSha !== "string") throw new Error("Pull request head SHA is missing");
-        const checkRun = await createReviewCheckRun(account.accessToken, owner, repoName, headSha);
-        const queuedReview = JSON.stringify({ kind: "check-run", checkRunId: checkRun.id, queuedAt: new Date().toISOString() });
-        const existingReview = await prisma.orm.public.Review.where({ repositoryId: repository.id, prNumber }).first();
-        if (existingReview) {
-          await prisma.orm.public.Review.where({ id: existingReview.id }).update({ prTitle: "Review queued…", prUrl: `https://github.com/${owner}/${repoName}/pull/${prNumber}`, review: queuedReview, status: "pending" });
-        } else {
-          await prisma.orm.public.Review.create({ repositoryId: repository.id, prNumber, prTitle: "Review queued…", prUrl: `https://github.com/${owner}/${repoName}/pull/${prNumber}`, review: queuedReview, status: "pending" });
-        }
 
-        // Send directly from the authenticated webhook. Do not route this
-        // through a server action or preflight GitHub request: the webhook
-        // must complete the Inngest handoff before returning 200.
+        // Hand off immediately. Review initialization, the check run, and
+        // visible progress message belong to the worker and must not be
+        // delayed by optional GitHub UI calls or a second database write.
         await inngest.send({
           name: "pr.review.requested",
           data: {
@@ -145,7 +134,6 @@ export async function POST(req: NextRequest) {
             repo: repoName,
             prNumber,
             userId: repository.userId,
-            checkRunId: checkRun.id,
             headSha,
           },
         });

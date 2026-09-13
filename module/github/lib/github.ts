@@ -14,6 +14,32 @@ export function isGithubAuthenticationError(error: unknown): boolean {
   );
 }
 
+/**
+ * Resolve a usable GitHub token through Better Auth. OAuth tokens must not be
+ * read directly from the account row: Better Auth may encrypt them and can
+ * refresh expiring provider tokens before returning them.
+ */
+export const getGithubTokenForUser = async (userId: string): Promise<string> => {
+  const account = await prisma.orm.public.Account.where({
+    userId,
+    providerId: "github",
+  }).select("id").first();
+
+  if (!account) {
+    throw new Error("No GitHub access token found");
+  }
+
+  const token = await auth.api.getAccessToken({
+    body: { accountId: account.id, userId },
+  });
+
+  if (!token.accessToken) {
+    throw new Error("No GitHub access token found");
+  }
+
+  return token.accessToken;
+};
+
 export const getGithubToken = async (): Promise<string> => {
   const session = await auth.api.getSession({
     headers: await headers(),
@@ -23,16 +49,7 @@ export const getGithubToken = async (): Promise<string> => {
     throw new Error("Unauthorized");
   }
 
-  const account = await prisma.orm.public.Account.where({
-    userId: session.user.id,
-    providerId: "github",
-  }).first();
-
-  if (!account || !account.accessToken) {
-    throw new Error("No GitHub access token found");
-  }
-
-  return account.accessToken;
+  return getGithubTokenForUser(session.user.id);
 };
 
 interface ContributionDay {
@@ -162,7 +179,17 @@ export const createWebhook = async (owner: string, repo: string) => {
     repo,
   });
 
-  const existinghook = hooks.find((hook) => hook.config.url === webhookUrl);
+  // Localtunnel URLs change between sessions. Match the Codepool endpoint by
+  // path as well as exact URL so reconnecting a repository repairs the old
+  // hook instead of creating another hook that still points at a dead tunnel.
+  const webhookPath = new URL(webhookUrl).pathname;
+  const existinghook = hooks.find((hook) => {
+    try {
+      return !!hook.config.url && new URL(hook.config.url).pathname === webhookPath;
+    } catch {
+      return hook.config.url === webhookUrl;
+    }
+  });
   if (existinghook) {
     const { data } = await octokit.rest.repos.updateWebhook({
       owner,
@@ -523,6 +550,108 @@ export async function postReviewComment(
     issue_number: prNumber,
     body: `## AI code review\n\n${review}\n\n*Powered by Codepool*`,
   });
+}
+
+/** Post a clear, human-visible lifecycle message when a worker begins. */
+export async function postReviewStartedComment(
+  token: string,
+  owner: string,
+  repo: string,
+  prNumber: number,
+  headSha?: string,
+) {
+  const octokit = new Octokit({ auth: token });
+  const commitLine = headSha ? `\n\nLatest commit: \`${headSha.slice(0, 12)}\`` : "";
+  const { data } = await octokit.rest.issues.createComment({
+    owner,
+    repo,
+    issue_number: prNumber,
+    body: `## ⏳ Codepool review started\n\nCodepool is reviewing this pull request now. I’ll post the findings when the analysis is complete.${commitLine}\n\n*Powered by Codepool*`,
+  });
+  return data.id;
+}
+
+const REVIEW_STATUS_MARKER = "<!-- codepool-review-status -->";
+
+export type ReviewStatus = "queued" | "in_progress" | "completed" | "failed";
+
+/** Create or update one visible progress comment per pull request. */
+export async function upsertReviewStatusComment(
+  token: string,
+  owner: string,
+  repo: string,
+  prNumber: number,
+  status: ReviewStatus,
+  headSha?: string,
+) {
+  const octokit = new Octokit({ auth: token });
+  const messages: Record<ReviewStatus, string> = {
+    queued: "🔎 Codepool review queued. The pull request is waiting for the review worker.",
+    in_progress: "⏳ Codepool review started. I’m analyzing the latest commit now.",
+    completed: "✅ Codepool review completed. Findings are posted below.",
+    failed: "⚠️ Codepool review could not be completed. Please retry the pull request.",
+  };
+  const commitLine = headSha ? `\n\nCommit: \`${headSha.slice(0, 12)}\`` : "";
+  const body = `${REVIEW_STATUS_MARKER}\n### Codepool\n\n${messages[status]}${commitLine}`;
+  const { data: comments } = await octokit.rest.issues.listComments({
+    owner,
+    repo,
+    issue_number: prNumber,
+    per_page: 100,
+  });
+  const existing = comments.find((comment) =>
+    typeof comment.body === "string" && (
+      comment.body.includes(REVIEW_STATUS_MARKER) ||
+      comment.body.includes("Codepool review started") ||
+      comment.body.includes("Codepool review queued")
+    ),
+  );
+
+  if (existing) {
+    await octokit.rest.issues.updateComment({
+      owner,
+      repo,
+      comment_id: existing.id,
+      body,
+    });
+    return existing.id;
+  }
+
+  const { data: created } = await octokit.rest.issues.createComment({
+    owner,
+    repo,
+    issue_number: prNumber,
+    body,
+  });
+  return created.id;
+}
+
+/** Fetch source files changed by a merged pull request at the merge SHA. */
+export async function getPullRequestChangedFileContents(
+  token: string,
+  owner: string,
+  repo: string,
+  prNumber: number,
+  ref: string,
+) {
+  const octokit = new Octokit({ auth: token });
+  const files = await octokit.paginate(octokit.rest.pulls.listFiles, {
+    owner,
+    repo,
+    pull_number: prNumber,
+    per_page: 100,
+  });
+
+  const contents = await Promise.all(
+    files
+      .filter((file) => file.status !== "removed")
+      .slice(0, MAX_REPOSITORY_FILES)
+      .map(async (file) => {
+        const content = await getGitHubFileContents(token, owner, repo, file.filename, ref);
+        return content === null ? null : { path: file.filename, content };
+      }),
+  );
+  return contents.filter((file): file is { path: string; content: string } => file !== null);
 }
 
 export type ReviewCheckRun = { id: number; headSha: string };

@@ -34,6 +34,10 @@ function comparisonTable(bundle: RuntimeDiffEvidenceBundle): string {
   return ["| Scenario | Base status | PR status | Base key fields | PR key fields | p50 base / PR | p99 base / PR |", "|---|---:|---:|---|---|---:|---:|", ...statuses, ...latency].join("\n");
 }
 
+export function formatRuntimeComparison(bundle: RuntimeDiffEvidenceBundle): string {
+  return comparisonTable(bundle);
+}
+
 export function formatRuntimeDiffComment(bundle: RuntimeDiffEvidenceBundle, explanation: RuntimeDiffExplanation): string {
   const level = highestEvidenceLevel(bundle);
   const historical = bundle.historical[0];
