@@ -3,6 +3,7 @@ import {
   postReviewComment,
   updateReviewCheckRun,
 } from "@/module/github/lib/github";
+import { resolveLocalSandboxConfig, resolveRepositorySandboxConfig } from "@/module/execution/config/repository-sandbox";
 import { buildRegressionJudgeContext } from "@/module/regression/judge";
 import { generateReview as generateModelReview, reviewOutputToMarkdown } from "@/lib/modelscope";
 import { prisma } from "@/src/prisma/db";
@@ -65,7 +66,7 @@ export const generateReview = inngest.createFunction(
       const account = await step.run("load-github-account-for-check", () => prisma.orm.public.Account.where({ userId, providerId: "github" }).first());
       if (!account?.accessToken) throw new Error("No GitHub access token found");
       if (typeof checkRunId === "number") await step.run("mark-check-in-progress", () => updateReviewCheckRun(account.accessToken!, owner, repo, checkRunId, "in_progress"));
-      const { diff, title, description, token, baseSha, headSha, labels } = await step.run(
+      const { diff, title, description, token, baseSha, headSha, labels, sandboxConfig } = await step.run(
       "fetch-pr-data",
       async () => {
         const account = await prisma.orm.public.Account.where({
@@ -83,7 +84,13 @@ export const generateReview = inngest.createFunction(
           repo,
           prNumber,
         );
-        return { ...data, token: account.accessToken };
+        let sandboxConfig = null;
+        try {
+          sandboxConfig = await resolveRepositorySandboxConfig(account.accessToken, owner, repo, data.baseSha);
+        } catch (error) {
+          console.warn("Ignoring invalid repository sandbox manifest; sandbox execution is fail-closed.", error);
+        }
+        return { ...data, token: account.accessToken, sandboxConfig };
       },
     );
 
@@ -91,7 +98,9 @@ export const generateReview = inngest.createFunction(
         buildRegressionJudgeContext({ repositoryId, repoSlug: `${owner}/${repo}`, title, description, diff, explicitFullVerification: labels?.includes("full-verification") === true }),
       );
 
-      if (context.riskTier === "sandbox-diff-engine" && process.env.SANDBOX_FIXTURE_SNAPSHOT) {
+      const localSandboxConfig = await step.run("resolve-local-sandbox-fallback", () => resolveLocalSandboxConfig());
+      const configuredSandbox = sandboxConfig ?? localSandboxConfig;
+      if (context.riskTier === "sandbox-diff-engine" && configuredSandbox) {
         await step.run("request-targeted-sandbox-differential-run", () => inngest.send({
           name: "sandbox.build.requested",
           data: {
@@ -99,9 +108,10 @@ export const generateReview = inngest.createFunction(
             pullRequestId: `${repositoryId}:pr:${prNumber}`,
             baseSha,
             prSha: headSha,
-            fixture: process.env.SANDBOX_FIXTURE_SNAPSHOT,
-            fixtureVersion: process.env.SANDBOX_FIXTURE_VERSION ?? "configured",
-            scenarios: JSON.parse(process.env.SANDBOX_SCENARIOS_JSON ?? "[]"),
+            fixture: configuredSandbox.fixture,
+            fixtureVersion: configuredSandbox.fixtureVersion,
+            scenarios: configuredSandbox.scenarios,
+            replayCassette: configuredSandbox.replayCassette,
             runId: `${repositoryId}:${prNumber}:${headSha}`,
             explicitFullVerification: labels?.includes("full-verification") === true,
             owner, repo, prNumber, userId,

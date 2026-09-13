@@ -444,6 +444,27 @@ export async function getRepoFileContents(
   return files;
 }
 
+/** Read one text file at an exact repository ref. A missing file is a valid
+ * result because sandbox execution is opt-in per repository. */
+export async function getGitHubFileContents(
+  token: string,
+  owner: string,
+  repo: string,
+  path: string,
+  ref: string,
+): Promise<string | null> {
+  const octokit = new Octokit({ auth: token });
+  try {
+    const { data } = await octokit.rest.repos.getContent({ owner, repo, path, ref });
+    if (Array.isArray(data) || data.type !== "file" || !data.content) return null;
+    return Buffer.from(data.content, "base64").toString("utf8");
+  } catch (error) {
+    const status = (error as { status?: number }).status;
+    if (status === 404) return null;
+    throw error;
+  }
+}
+
 export async function getPullRequestDiff(
   token: string,
   owner: string,

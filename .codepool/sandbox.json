@@ -1,0 +1,10 @@
+{
+  "healthEndpoint": "/api/health",
+  "fixturePath": "module/execution/seed/fixtures/codepool-v1.sql",
+  "fixtureVersion": "v1",
+  "replayCassettePath": "module/execution/traffic/fixtures/codepool-v1.json",
+  "scenarios": [
+    { "id": "home", "method": "GET", "path": "/", "iterations": 3 },
+    { "id": "login-page", "method": "GET", "path": "/login", "iterations": 3 }
+  ]
+}

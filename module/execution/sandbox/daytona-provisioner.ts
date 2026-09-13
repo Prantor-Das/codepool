@@ -12,7 +12,7 @@ const required = (name: string) => { const value = process.env[name]?.trim(); if
 const quote = (value: string) => `'${value.replaceAll("'", `'"'"'`)}'`;
 const isNotFound = (error: unknown) => { const e = error as { status?: number; statusCode?: number }; return e?.status === 404 || e?.statusCode === 404; };
 function client() { return new Daytona({ apiKey: required("DAYTONA_API_KEY"), apiUrl: process.env.DAYTONA_API_URL, target: process.env.DAYTONA_TARGET }); }
-async function config(): Promise<Config> {
+async function config(cassetteOverride?: CassetteEntry[]): Promise<Config> {
   if (process.env.DAYTONA_NETWORK_BLOCK_ALL === "false" || process.env.DAYTONA_DOMAIN_ALLOW_LIST) throw new Error("Differential runs require block-all egress; live allow lists are not supported.");
   const databaseUrl = process.env.DAYTONA_DATABASE_URL ?? "postgresql://postgres:postgres@postgres:5432/postgres";
   assertLocalDatabaseUrl(databaseUrl);
@@ -20,7 +20,7 @@ async function config(): Promise<Config> {
   const compose = required("DAYTONA_COMPOSE_TEMPLATE");
   if (!/^[a-zA-Z0-9_./-]+$/.test(compose) || compose.startsWith("/") || compose.split("/").includes("..")) throw new Error("Compose path must be repository-relative.");
   return { snapshot: required("DAYTONA_TEMPLATE_SNAPSHOT"), compose, databaseUrl, appPort: Number(process.env.DAYTONA_APP_PORT ?? 3000), timeout: 120,
-    archives: JSON.parse(process.env.DAYTONA_REPO_ARCHIVES_JSON ?? "{}"), cassette: process.env.DAYTONA_REPLAY_CASSETTE ? JSON.parse(await readFile(process.env.DAYTONA_REPLAY_CASSETTE, "utf8")) : [] };
+    archives: JSON.parse(process.env.DAYTONA_REPO_ARCHIVES_JSON?.trim() || "{}"), cassette: cassetteOverride ?? (process.env.DAYTONA_REPLAY_CASSETTE?.trim() ? JSON.parse(await readFile(process.env.DAYTONA_REPLAY_CASSETTE.trim(), "utf8")) : []) };
 }
 async function exec(sandbox: Sandbox, script: string, cfg: Config) {
   const result = await sandbox.process.executeCommand(`set -eu; ${script}`, undefined, {}, cfg.timeout);
@@ -86,9 +86,9 @@ class Environment implements SandboxEnvironment {
   }
 }
 export class DaytonaSandboxProvisioner implements SandboxProvisioner {
-  constructor(private daytona = client(), private downloadArchive?: (sha: string) => Promise<Buffer>) {}
+  constructor(private daytona = client(), private downloadArchive?: (sha: string) => Promise<Buffer>, private replayCassette?: CassetteEntry[]) {}
   async provisionPair(baseSha: string, prSha: string): Promise<SandboxPair> {
-    const cfg = await config();
+    const cfg = await config(this.replayCassette);
     const bytes = await Promise.all([baseSha, prSha].map(sha => this.downloadArchive ? this.downloadArchive(sha) : archiveBytes(sha, cfg)));
     const pairId = `codepool-${randomUUID()}`;
     const created: Sandbox[] = [];

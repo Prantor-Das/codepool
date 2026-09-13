@@ -2,6 +2,7 @@ import "dotenv/config";
 import { Daytona } from "@daytonaio/sdk";
 import { DaytonaSandboxProvisioner } from "../module/execution/sandbox/daytona-provisioner";
 import { snapshotFromFixture } from "../module/execution/seed/fixtures";
+import { resolveLocalSandboxConfig } from "../module/execution/config/repository-sandbox";
 
 if (!process.env.DAYTONA_API_KEY || !process.env.DAYTONA_TEMPLATE_SNAPSHOT) {
   console.log("SKIP: Daytona verification requires an API key and a prepared template snapshot.");
@@ -14,18 +15,21 @@ try {
   const snapshot = await daytona.snapshot.get(process.env.DAYTONA_TEMPLATE_SNAPSHOT);
   if (snapshot.cpu > 2 || snapshot.mem > 4 || snapshot.disk > 20) throw new Error("Template exceeds the approved 2 CPU / 4 GiB / 20 GiB budget.");
   console.log("PASS: configured Daytona template exists and meets resource ceilings.");
-  if (!process.env.DAYTONA_REPO_ARCHIVES_JSON || !process.env.DAYTONA_VERIFY_BASE_SHA || !process.env.DAYTONA_VERIFY_PR_SHA || !process.env.SANDBOX_FIXTURE_SNAPSHOT) {
+  const sandboxConfig = await resolveLocalSandboxConfig();
+  if (!process.env.DAYTONA_REPO_ARCHIVES_JSON || !process.env.DAYTONA_VERIFY_BASE_SHA || !process.env.DAYTONA_VERIFY_PR_SHA || !sandboxConfig) {
     console.log("SKIP: live pair verification needs DAYTONA_REPO_ARCHIVES_JSON, full base/PR verification SHAs, and SANDBOX_FIXTURE_SNAPSHOT. Production workers download commit archives on the control plane using the repository owner's GitHub account.");
   } else {
     const pair = await provisioner.provisionPair(process.env.DAYTONA_VERIFY_BASE_SHA, process.env.DAYTONA_VERIFY_PR_SHA);
     pairId = pair.pairId;
     if (pair.baseEnv.id === pair.prEnv.id) throw new Error("Sandbox IDs must differ.");
-    const seed = snapshotFromFixture({ version: "verify", format: "sql", fixture: process.env.SANDBOX_FIXTURE_SNAPSHOT });
+    const seed = snapshotFromFixture({ version: sandboxConfig.fixtureVersion, format: "sql", fixture: sandboxConfig.fixture });
     await Promise.all([pair.baseEnv.seedDatabase(seed), pair.prEnv.seedDatabase(seed), pair.baseEnv.seedRedis(seed), pair.prEnv.seedRedis(seed)]);
     console.log("PASS: separate VMs accepted the same database and Redis seed.");
     for (const environment of [pair.baseEnv, pair.prEnv]) {
-      const health = await environment.request({ method: "GET", path: "/health" });
-      if (health.status >= 400) throw new Error("Sandbox health check failed.");
+      for (const scenario of sandboxConfig.scenarios) {
+        const response = await environment.request(scenario);
+        if (response.status >= 400) throw new Error(`Sandbox scenario failed: ${scenario.id}.`);
+      }
       await environment.auditEgress!();
     }
     console.log("PASS: both apps respond and provider block-all/offline replay assertions hold.");
