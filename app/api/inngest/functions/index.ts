@@ -17,6 +17,7 @@ import { indexCodeBase } from "@/module/ai/lib/rag";
 import {
   getOpenPullRequests,
   getRepoFileContents,
+  isGithubAuthenticationError,
   updateReviewCheckRun,
 } from "@/module/github/lib/github";
 export { buildSandbox, publishDifferentialEvidenceComment, requestDifferentialRun, runDifferential } from "./sandbox";
@@ -117,15 +118,38 @@ export const pollRepositories = inngest.createFunction(
       );
       if (!account?.accessToken) continue;
 
-      const pullRequests = (await step.run(
-        `load-open-pull-requests-${repository.id}`,
-        () =>
-          getOpenPullRequests(
-            account.accessToken!,
-            repository.owner,
-            repository.name,
-          ),
-      )) as unknown as OpenPullRequest[];
+      let pullRequests: OpenPullRequest[];
+      try {
+        pullRequests = (await step.run(
+          `load-open-pull-requests-${repository.id}`,
+          () =>
+            getOpenPullRequests(
+              account.accessToken!,
+              repository.owner,
+              repository.name,
+            ),
+        )) as unknown as OpenPullRequest[];
+      } catch (error) {
+        if (!isGithubAuthenticationError(error)) throw error;
+
+        // Do not let one revoked OAuth token fail the whole cron run. Clearing
+        // the token also prevents Inngest retries from hammering GitHub with
+        // the same invalid credential. The next GitHub sign-in will refresh
+        // this account row with a new token.
+        await step.run(`clear-invalid-github-token-${repository.id}`, () =>
+          prisma.orm.public.Account.where({
+            userId: repository.userId,
+            providerId: "github",
+          }).update({
+            accessToken: null,
+            accessTokenExpiresAt: null,
+          }),
+        );
+        console.warn(
+          `[github] revoked or expired token for ${repository.owner}/${repository.name}; skipped polling until the user reconnects GitHub`,
+        );
+        continue;
+      }
 
       for (const pullRequest of pullRequests) {
         const existingReviews = await prisma.orm.public.Review.where({

@@ -4,6 +4,16 @@ import { prisma } from "@/src/prisma/db";
 import { headers } from "next/headers";
 import { reviewCheckRunPayload } from "@/lib/review-check";
 
+/** GitHub returns 401 when an OAuth token has been revoked or expired. */
+export function isGithubAuthenticationError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    (error as { status?: unknown }).status === 401
+  );
+}
+
 export const getGithubToken = async (): Promise<string> => {
   const session = await auth.api.getSession({
     headers: await headers(),
