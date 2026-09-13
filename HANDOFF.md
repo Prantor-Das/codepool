@@ -2,455 +2,401 @@
 
 ## 1. Project Overview
 
-CodePool is a Next.js web application for connecting GitHub repositories, receiving pull-request webhooks, generating AI code reviews, and showing those reviews in a dashboard. The intended users are developers who want repository-aware PR review and, increasingly, regression-risk detection based on repository history.
+CodePool is a Next.js web application that connects GitHub repositories, receives pull-request webhooks, generates repository-aware AI code reviews, and displays review results in a dashboard. The longer-term product goal is to use repository history and runtime/review evidence to identify regression risk and preserve historical bug fixes as reusable invariants and antibodies.
 
-The current development objective is the repository-memory graph and regression-analysis sequence from the recent prompts:
+The intended users are developers and teams who want automated PR review with repository context, historical bug knowledge, and eventually sandbox validation for high-risk changes.
 
-1. Neo4j graph foundation.
-2. Git/AST ingestion for commits, files, symbols, versions, and relationships.
-3. Historical bug-fix mining into antibodies/invariants.
-4. **Current uncommitted work:** bounded impact analysis for an open PR and integration into the LLM review path.
+Current development objective: continue the repository-memory and regression-analysis architecture. The current `HEAD` contains the Neo4j graph foundation, Git/AST history ingestion, historical bug-fix mining, and the first regression-judge/impact-analysis integration. The next engineering work is live-service validation and hardening, followed by a Sandbox Diff Engine.
 
-Stack and services:
+Technology and services:
 
-- Next.js 16.3 / React 19 / TypeScript, App Router, Tailwind/shadcn/Base UI.
-- Better Auth with PostgreSQL through Kysely and Prisma ORM Postgres contracts/migrations.
-- GitHub OAuth and REST API through Octokit; GitHub `pull_request` webhooks.
-- Inngest for async review, polling, history, and graph jobs.
-- Google AI SDK (`gemini-3.6-flash`) for review/classification/extraction.
-- Pinecone for repository and antibody semantic search.
-- Neo4j (`neo4j-driver`) for repository-memory graph traversal.
-- `ts-morph` for in-memory TS/JS extraction; Bun is the declared package manager.
+- Next.js `16.3.4`, React `19.2.8`, TypeScript, App Router, Tailwind/shadcn/Base UI.
+- Bun `1.4.2` as the declared package manager.
+- Better Auth, Kysely, PostgreSQL, and Prisma ORM Postgres contracts/migrations for users, OAuth accounts, connected repositories, reviews, and webhook-delivery deduplication.
+- Octokit for GitHub OAuth-related API access, repository contents, commits, pull requests, check runs, comments, and webhooks.
+- Inngest for asynchronous indexing, history mining, review generation, polling, and graph jobs.
+- Google AI SDK with `gemini-3.6-flash` for reviews, bug classification, invariant extraction, antibody extraction, and regression-judge context.
+- Pinecone integrated records for repository source-code vectors and historical antibody vectors.
+- Neo4j via `neo4j-driver` for the Repository Memory Graph.
+- `ts-morph` for in-memory TypeScript/JavaScript AST extraction.
 
-The repository root is `C:\Users\138487\Desktop\Codepool\codepool`. `README.md` is still the stock Next.js README and does not document the actual architecture.
+The actual workspace is `C:\Users\adrij\Desktop\codepool`. `README.md` now documents the actual setup and architecture, including the Repository Memory and sandbox sections; this file remains the authoritative continuation document for implementation status and risks.
 
 ## 2. Current State
 
 ### Completed
 
-- GitHub repository connection, webhook creation, authenticated review queueing, check-run lifecycle, dashboard, and review UI exist in the committed code.
-- The Neo4j graph client/writer and uniqueness constraints exist. The writer validates `sourceType` and confidence (`0..1`).
-- Commit ingestion, AST extraction, symbol versioning, merged-PR ingestion, and historical bug-fix/antibody/invariant pipelines exist in commits `410d855`, `1b17b7b`, and `284aa3e`.
-- The uncommitted impact feature has been implemented in source files listed below.
-- This session verified `bun test` (5 passing tests), `bun run lint` (no reported lint failures), and `bunx tsc --noEmit --incremental false` (success).
+- GitHub repository connection, OAuth account lookup, webhook installation, webhook HMAC verification, webhook-delivery deduplication, review queue/check-run lifecycle, review generation, and dashboard/review UI are present.
+- Neo4j client, session cleanup wrapper, graph writer, provenance validation, and uniqueness constraints exist in `module/knowledge-graph`.
+- Canonical graph labels and relationship names are represented in `module/knowledge-graph/lib/graph-writer.ts`. Nodes and relationships written through the shared writer carry `sourceType` and `confidence`.
+- Full commit history mining and merged-PR graph ingestion exist. AST extraction produces symbols, calls, reads/writes, route hints, imports/exports, and content hashes. `Symbol` and `SymbolVersion` are separate; a new version is intended only when the AST content hash changes.
+- Historical bug-fix mining exists: LLM classification, invariant extraction, antibody extraction, Neo4j relationships, candidate lifecycle fields, and Pinecone `repo-antibodies` indexing.
+- Inngest functions exist for `history.mine.requested`, `bug.classify`, `antibody.extract.requested`, and `invariant.extract.requested`.
+- Regression impact analysis exists in `module/knowledge-graph/impact`, including bounded blast-radius and historical-impact queries.
+- Regression-judge orchestration exists in `module/regression/judge.ts`; the review function includes its structured context and routing tier in the review prompt.
+- Risk scoring exists in `module/regression/risk-score.ts`, with a `0.75` sandbox-routing threshold.
+- The current branch is `main`, and the latest commit is `f617aaa` (`feat: Implement regression judge context and impact analysis`).
 
 ### In Progress
 
-- The impact layer is implemented but not exercised against a real Neo4j server. Its fixture script exists but has not run because service credentials were not supplied.
-- The review Inngest function now calls the new regression judge and passes JSON context to the LLM. This needs end-to-end validation with an actual connected repository, graph data, Pinecone, Inngest, GitHub webhook, and Google model credential.
-- `IMPORTS` relationships were added to the graph writer/miner to support impact traversals, but their implementation has important defects listed under Known Bugs/Risks.
+- Impact analysis and historical/antibody paths have not been validated against a live Neo4j/Pinecone deployment in this workspace.
+- The regression judge uses best-effort regex diff parsing and may fail to identify edits inside existing symbols or symbols represented by changed files but not newly declared in the diff.
+- The `IMPORTS` graph relationship path was added but is not reliable yet; see Known Bugs.
+- The current working tree was clean before this README/documentation task. The intended changes from this session are `README.md` and this updated `HANDOFF.md`.
 
 ### Not Started
 
-- Prompt 5's Sandbox Diff Engine has not been built. `sandbox-diff-engine` is currently only a risk-routing label.
-- The optional Neo4j GDS PageRank fragility precomputation (`gds.pageRank.stream`) has not been implemented.
-- There is no UI for graph/impact/risk data and no persistence of the judge score/tier on `Review`.
-- No unit tests cover `blast-radius.ts`, `historical-impact.ts`, `risk-score.ts`, or diff symbol identification. Only an integration-style Neo4j fixture script exists.
-- The stock README has not been updated for setup, architecture, or graph operations.
+- Production-grade Sandbox Diff Engine/provider rollout and operational hardening.
+- Optional Neo4j GDS PageRank/fragility precomputation.
+- UI or persistence for impact score, risk tier, historical matches, graph context, or sandbox results.
+- Automatic discovery of all historical merged PRs from GitHub and automatic dispatch of `history.mine.requested` from repository connection. The current history pipeline expects an event containing `HistoricalPullRequest[]`.
+- Focused unit tests for blast radius, historical impact, judge diff parsing, risk score, and fallback behavior.
+- Production-grade graph/Pinecone observability, retry/checkpoint strategy, and cross-store consistency handling.
+- Accurate AST-based changed-symbol identification for arbitrary PR diffs.
+- Ongoing README refinement as architecture and provider configuration evolve.
 
 ### Blocked
 
-- Service-backed verification is blocked by the lack of configured service credentials in this environment. Do not expose or commit `.env`; it is gitignored.
-- Neo4j, Pinecone, GitHub OAuth/webhook delivery, Inngest, and Google model calls were not exercised here.
+- Live graph/vector verification is blocked in this environment because `.env` does not contain verified Neo4j credentials, and no live service configuration was supplied for this session. Do not add real credentials to git or to `HANDOFF.md`.
+- Any end-to-end GitHub/Inngest/Google/Pinecone/Neo4j verification also requires valid service credentials and running/configured services.
 
 ### Known Bugs
 
-- `module/knowledge-graph/history/commit-miner.ts` currently attempts to create `IMPORTS` edges **before** it upserts the current batch's `Symbol` nodes. On the first commit there are no symbols to connect; this needs to run after the symbol upsert.
-- That import-resolution Cypher only compares `target.filePath` to strings such as `replace(modulePath, "./", "") + ".ts"`; it ignores the importing file's directory. It only has a chance for root-level relative modules and does not resolve `.js`, `.mts`, aliases, `../`, or extension/index alternatives correctly. It also swallows every query error with `.catch(() => undefined)`.
-- `CALLS` resolution is name-only across a repository (`target.name = call`). Same-named functions/classes can be incorrectly connected; qualified methods and imported aliases are not resolved semantically.
-- `changedIdentifiersFromDiff()` in `module/regression/judge.ts` only recognizes added `function`, `class`, and simple `const`/`let`/`var =` declarations. It misses methods, many exported/assigned forms, existing-symbol body edits, renamed/deleted symbols, and changes where no declaration line is added. An empty result yields an empty graph context.
-- The judge intentionally catches all graph failures and all Pinecone failures and falls back silently to an empty context. This protects standard reviews, but operational graph failures are currently invisible except indirectly in logs/errors from callers.
-- `getBlastRadius()`/`getHistoricalImpact()` use bounded Cypher subqueries but have not been executed against the target Neo4j version. Validate syntax and query plans before relying on them in production.
-- `repository.graph.build.requested` calls `mineRepositoryHistory()`, so it reparses full history; this conflicts with the intended distinction that later commit handling should be incremental.
-- Full history mining performs many GitHub REST calls sequentially and has no explicit rate-limit/backoff/checkpoint handling. Large repositories can be slow or rate-limited.
-- The `codepool-suggested` PR-origin detector in `app/api/webhook/github/route.ts` is heuristic (`[codepool-suggested]` text or a `codepool-`/`codepool/` marker). The existing review system creates comments, not authored commits/PRs, so there is no verified native suggestion marker.
-- `scripts/verify-ingestion.ts` cleanup matches only `id = $repositoryId`, while most generated graph nodes have prefixed IDs. It may leave fixture graph nodes behind after a successful run.
-- Existing source/UI strings contain visibly malformed replacement characters (for example `Review in progress�?�`); this predates the impact work and should be cleaned separately.
+- `module/knowledge-graph/history/commit-miner.ts` attempts `IMPORTS` edges before the current batch's `Symbol` nodes are upserted. First-pass imports can therefore have no targets. Move import-edge creation after symbol creation.
+- Import resolution is incomplete: it does not correctly account for the importing file's directory and does not robustly support `.js`, `.mts`, `../`, aliases, extension variants, or index files. One path currently swallows query failures; errors should be scoped and observable.
+- `CALLS` resolution is repository-wide name matching. Same-named functions/classes can be connected incorrectly, and aliases/qualified methods are not resolved semantically.
+- `changedIdentifiersFromDiff()` in `module/regression/judge.ts` is regex-based and mainly catches added function/class/simple variable declarations. It misses body-only edits, methods, many export/assignment forms, deleted/renamed symbols, and changes with no added declaration.
+- Graph and Pinecone failures in regression-judge context are intentionally degraded to empty context so ordinary reviews can continue, but the failures are not yet surfaced through a durable metric/event.
+- Neo4j Cypher in the impact modules has not been run against the target Neo4j version. Validate syntax, bounded traversal, and query plans.
+- `repository.graph.build.requested` invokes full `mineRepositoryHistory()`, so it reparses full history instead of being an incremental graph refresh.
+- Full history mining performs many sequential GitHub API calls and has no explicit checkpoint, rate-limit, or backoff strategy.
+- Graph write and Pinecone antibody upsert are not one transaction. A Pinecone failure after Neo4j writes can leave the two stores temporarily divergent; a Neo4j failure after a vector write has the inverse risk.
+- `scripts/verify-ingestion.ts` cleanup only matches the repository root ID while generated child nodes use prefixed IDs, so successful fixture runs may leave data.
+- `scripts/verify-antibodies.ts` uses deterministic fixture/stub extractor dependencies but still requires live Neo4j and Pinecone for persistence; it is not a pure unit test.
+- Current UI/source strings contain malformed replacement characters in places such as review queue text. This predates the regression work.
+- README now documents the current architecture, but should be kept synchronized as sandbox/provider behavior evolves.
 
 ## 3. Current Task
 
-Original goal: implement the impact-analysis layer that runs when a PR is opened, merge blast-radius/historical/Pinecone evidence into the existing Regression Judge, compute a risk score, and route high-risk/resurrection candidates to the future Sandbox Diff Engine.
+The last implementation objective was to build a regression-judge context for an opened/synchronized PR. It should combine bounded Neo4j graph reachability, historical antibody/invariant evidence, Pinecone semantic context, and a weighted risk score, then route high-risk or historical-resurrection candidates toward a future Sandbox Diff Engine.
 
-What is implemented:
+Implemented behavior:
 
-- `getBlastRadius(repositoryId, changed)` returns changed symbols, callers, reachable symbols, antibodies/invariants, endpoints, scenarios, and database dependencies using bounded paths.
-- `getHistoricalImpact(repositoryId, changed)` looks for `Antibody -> DERIVED_FROM -> PullRequest -> FIXED -> Bug` chains reachable by bounded `CALLS`/`IMPORTS` paths.
-- `computeImpactScore()` uses the requested relationship weights and `SANDBOX_TRIGGER_SCORE = 0.75`.
-- `buildRegressionJudgeContext()` derives best-effort changed identifiers from a unified diff, queries graph/history and Pinecone, calculates risk, and returns a structured object and `standard-review` or `sandbox-diff-engine` tier.
-- `app/api/inngest/functions/review.ts` includes that object as JSON in the LLM prompt.
-- `scripts/verify-impact.ts` builds a two-CALLS-hop antibody fixture with an endpoint and historical-fix chain, then asserts antibody discovery, endpoint discovery, and a score above the sandbox threshold.
+1. The existing webhook queues `pr.review.requested` for opened/synchronize/reopened/ready-for-review PR actions.
+2. `generateReview` fetches the PR diff/title/body.
+3. `buildRegressionJudgeContext()` extracts best-effort changed identifiers, queries graph impact and historical impact, retrieves Pinecone context, calculates a score, and returns a structured context plus either `standard-review` or `sandbox-diff-engine` tier.
+4. The review prompt includes that structured JSON and the tier before the raw diff. The tier is advisory context only; it is not proof of a runtime regression.
 
-What remains:
+The historical knowledge path is also present:
 
-- Correct the `IMPORTS` edge creation timing and module-path resolution before treating import traversal as functional.
-- Run `bun run verify:impact` on Neo4j and fix any Cypher compatibility/query issues.
-- Add focused unit tests for diff parsing and risk scoring; add a test fixture that confirms bounded traversal behavior.
-- Decide how to extract changed symbols accurately from the PR's changed files/AST rather than the current regex. GitHub's PR files API or contents at the PR head would be a suitable source.
-- Implement the actual Sandbox Diff Engine and consume the tier, or persist/expose the tier so it is not only prompt text.
-- Decide whether graph/Pinecone failures should emit observability events/metrics instead of being silently absorbed.
+- A `HistoricalPullRequest` contains repository/PR identity, title/body/diff, optional linked issue, stable touched-symbol IDs, and optional regression-test IDs.
+- Bug-fix classification returns `{ isBugFix, confidence }` from Gemini.
+- Invariant extraction returns statement/category/severity/confidence. Invariants are independent Neo4j nodes with `status: "candidate"`, `validFrom`, `validUntil`, and `supersededBy` fields.
+- Antibody extraction returns problem/root cause/confidence. Antibodies are independent candidate nodes and link to the invariant, PR, touched symbols, and regression tests.
+- Antibody text is upserted to Pinecone namespace `repo-antibodies` with `neo4jId` metadata.
 
-Expected final behavior: an `opened`/`synchronize` PR currently triggers `pr.review.requested`; the review function should resolve changed symbols, form bounded structural/historical/runtimesurface context, do semantic retrieval, score it, provide the structured facts to the LLM, and flag high risk for sandbox execution without claiming a runtime regression as fact.
+Expected final behavior for the regression work: normal review generation remains available when graph/vector services are unavailable, while degradation is observable; known historical fixes and bounded structural impact are included when services are available; high-risk routing eventually launches a real Sandbox Diff Engine without presenting a heuristic tier as a confirmed regression.
 
-Acceptance criteria for continuing work:
+Acceptance criteria for the next implementation phase:
 
-1. Real Neo4j fixture run prints all three impact PASS assertions and cleans up.
-2. A changed helper two or three call hops from an antibody discovers that antibody/invariant and its served endpoint.
-3. Import-derived reachability works for nested relative imports and no errors are silently discarded.
-4. No traversal exceeds CALLS 4, IMPORTS 3, or data dependency 2.
-5. An ordinary PR still receives a review if Neo4j/Pinecone are unavailable, while the degradation is observable.
-6. A high score or historical resurrection feeds a real downstream Sandbox Diff Engine once that feature exists.
+1. `bun run verify:ingestion` and `bun run verify:impact` pass against a configured Neo4j instance and clean their fixtures.
+2. A helper two or three `CALLS` hops from an antibody discovers that antibody/invariant and any served endpoint, without exceeding the configured bounds.
+3. Nested relative import traversal works and no import-query errors are silently discarded.
+4. `bun run verify:antibodies` passes against configured Neo4j and Pinecone and confirms the expected Antibody/Invariant/Symbol/PullRequest links.
+5. Ordinary review generation still works with unavailable graph/vector services, with an explicit degraded signal or observability path.
+6. A high score or historical resurrection can invoke a real Sandbox Diff Engine once that component is implemented.
 
 ## 4. Work Completed In This Session
 
-### Impact-analysis implementation
+This session was a documentation session. No application code, dependency, database, or environment value was intentionally changed.
 
-- `module/knowledge-graph/impact/blast-radius.ts` (new, untracked)
-  - Added `ImpactSubgraph` and `getBlastRadius()`.
-  - It uses separate bounded Cypher patterns: callers `[:CALLS*1..4]`, structural reachability `[:CALLS*0..4]` and `[:IMPORTS*1..3]`, and data `[:READS|WRITES*1..2]`.
-  - It collects `Antibody-[:WATCHES]->Symbol`, optional `PROTECTS` invariant, `SERVES` endpoints, and reverse `TOUCHES` scenarios.
-  - Not service-tested; type checked and linted only.
+- `HANDOFF.md`
+  - Inspected the actual repository, current branch/log/status, package/configuration, README, tests, graph/history/impact/review code, webhook/auth flow, and environment template.
+  - Replaced stale status text that described impact work as uncommitted even though it is in `HEAD`.
+  - Corrected the workspace path, documented current commit state, separated completed/in-progress/not-started/blocked work, recorded known implementation risks, and documented exact commands/environment names without secrets.
+  - This file is one of the two intentional modified documentation files after this session and should not be reverted or discarded.
 
-- `module/knowledge-graph/impact/historical-impact.ts` (new, untracked)
-  - Added bounded traversal to a watched symbol and historical `Antibody -> PullRequest -> Bug`, plus optional issue/invariant metadata.
-  - Not service-tested; type checked and linted only.
+- `README.md`
+  - Replaced the stock Next.js README with project-specific setup, architecture, environment, workflow, command, limitation, and development documentation.
+  - Added a dedicated Repository Memory and Sandbox section describing Neo4j/Pinecone/PostgreSQL ownership, graph relationships, historical antibody flow, regression judging, and the configured differential execution path.
+  - No application behavior was changed; README content was based on the inspected source/configuration and `HANDOFF.md`.
 
-- `module/regression/risk-score.ts` (new, untracked)
-  - Added the requested weight table, `computeImpactScore()`, and trigger threshold `.75`.
-  - Current formula is `relationship*.25 + inverseDistance*.15 + historical*.25 + runtime*.20 + changeMagnitude*.15`, clamped to `1`.
-  - `unrelatedImport: .1` is exposed in the table but is not currently used by the formula; this is a gap to resolve deliberately.
+Previously completed work relevant to continuation is in the recent commits, not newly authored in this session:
 
-- `module/regression/judge.ts` (new, untracked)
-  - Added regex-based `changedIdentifiersFromDiff()` and `buildRegressionJudgeContext()`.
-  - Runs Pinecone retrieval in parallel with graph/historical lookups. Graph and Pinecone failures degrade to empty data to avoid blocking reviews.
-  - Calculates change magnitude from added/removed diff lines divided by 100. A historical match always routes to `sandbox-diff-engine`, even if the numeric score is below threshold.
-  - Not unit-tested.
-
-- `app/api/inngest/functions/review.ts` (modified, uncommitted)
-  - Replaced direct `retrieveContext()` call with `buildRegressionJudgeContext()` in an Inngest step named `build-regression-judge-context`.
-  - The AI prompt now contains JSON structured context and routing tier before the raw diff.
-  - Existing review persistence/comment/check-run behavior was not otherwise changed.
-
-- `scripts/verify-impact.ts` (new, untracked)
-  - Creates three Symbol nodes with a two-hop CALLS chain, a `SERVES` endpoint, a Scenario, an Antibody/Invariant, and a historical PR/Bug/Issue chain.
-  - Asserts the two-hop antibody, endpoint, and numeric score. It cleans nodes prefixed by its generated repository ID.
-  - Not run because Neo4j was not configured.
-
-### Follow-on graph changes required by impact work
-
-- `module/knowledge-graph/lib/graph-writer.ts` (modified, uncommitted)
-  - Added `IMPORTS` to the allowed typed relationship list so graph writes can use it.
-
-- `module/knowledge-graph/history/commit-miner.ts` (modified, uncommitted)
-  - Added an attempted relative-import-to-symbol `IMPORTS` materialization query.
-  - This is not ready as described in Known Bugs; do not assume it works simply because the type list permits `IMPORTS`.
-
-- `module/knowledge-graph/extraction/ast.ts` (modified, uncommitted)
-  - Removed an unused `SourceFile` parameter/import during lint cleanup. Behavior is otherwise unchanged.
-
-- `package.json` (modified, uncommitted)
-  - Added `verify:impact`: `bun scripts/verify-impact.ts`.
-
-No database migration was added: Neo4j is external and this work did not change PostgreSQL contract models.
+- `410d855`: Neo4j client/writer, constraints, and graph verification script.
+- `1b17b7b`: history synchronization, AST extraction, commit/merged-PR graph ingestion, webhook/function wiring, and ingestion fixture.
+- `284aa3e`: bug classifier, invariant/antibody extractors, pipeline, Pinecone antibody namespace, Inngest chain, and antibody fixture.
+- `f617aaa`: regression judge context, impact queries, risk scoring, review integration, and impact fixture.
 
 ## 5. Files That Matter
 
 | File | Importance | Purpose | Current relevance |
-| ---- | ---------- | ------- | ----------------- |
-| `HANDOFF.md` | Critical | Continuation record | Read first; it documents uncommitted work and risks. |
-| `app/api/inngest/functions/review.ts` | Critical | Existing LLM review job | Now consumes the regression judge context. |
-| `module/regression/judge.ts` | Critical | New orchestration layer | Diff identifier extraction, graph/Pinecone merge, risk tier. |
-| `module/regression/risk-score.ts` | High | Risk score contract | Weight table, threshold, current formula. |
-| `module/knowledge-graph/impact/blast-radius.ts` | Critical | Bounded graph impact query | Core current task; needs live Neo4j validation. |
-| `module/knowledge-graph/impact/historical-impact.ts` | Critical | Historical resurrection query | Core current task; needs live Neo4j validation. |
-| `module/knowledge-graph/history/commit-miner.ts` | Critical | Git/AST graph writer | Provides CALLS/SERVES/data edges; current IMPORTS insertion is defective. |
-| `module/knowledge-graph/extraction/ast.ts` | High | TS/JS AST extraction | Defines calls, imports, reads/writes, route detection, symbol hashes. |
-| `module/knowledge-graph/lib/graph-client.ts` | High | Neo4j driver/session access | Reads `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`. |
-| `module/knowledge-graph/lib/graph-writer.ts` | High | Typed graph write/provenance API | All label/relationship/provenance validation; now contains `IMPORTS`. |
-| `module/knowledge-graph/schema/constraints.ts` | High | Neo4j uniqueness constraints | Apply before service-backed graph tests. |
-| `module/knowledge-graph/history/bug-fix-pipeline.ts` | High | Antibody/invariant graph model | Defines the relationship directions historical impact relies on. |
-| `app/api/webhook/github/route.ts` | High | GitHub webhook ingress | Queues reviews on open/sync and graph ingestion on merged PRs. |
-| `app/api/inngest/functions/index.ts` | High | Graph/Inngest job registrations | History sync, graph build, merged PR ingestion, index/poll jobs. |
-| `app/api/inngest/route.ts` | High | Inngest serve endpoint | Must register any future Inngest function. |
-| `module/ai/lib/rag.ts` | High | Pinecone codebase indexing/search | Judge uses `retrieveContext()`; vectors use repo slug `${owner}/${repo}`. |
-| `scripts/verify-impact.ts` | High | New Neo4j integration fixture | First live validation target for the current task. |
-| `scripts/verify-ingestion.ts` | Medium | Ingestion fixture | Confirms symbol/version/CALLS basics but cleanup needs correction. |
-| `scripts/verify-antibodies.ts` | Medium | Antibody pipeline fixture | Confirms historical graph relationship directions. |
-| `src/prisma/contract.prisma` | High | PostgreSQL schema | User/account/repository/review/webhook tables. |
-| `.env.example` | High | Required configuration list | Use to create local `.env`; never commit secrets. |
-| `package.json` | High | Commands/dependencies | Bun scripts include all verification commands. |
+| ---- | ---- | ---- | ---- |
+| `HANDOFF.md` | Critical | Continuation record | Read first; this file is the source of current project status. |
+| `package.json` | Critical | Dependencies and verified scripts | Defines Bun commands, Neo4j/Pinecone/AI dependencies, and fixture commands. |
+| `.env.example` | Critical | Configuration template | Lists required PostgreSQL, GitHub, Google, Pinecone, and Neo4j variable names. |
+| `app/api/webhook/github/route.ts` | Critical | GitHub webhook ingress | Verifies/deduplicates webhooks and queues review/merged-PR events. |
+| `app/api/inngest/route.ts` | Critical | Inngest endpoint registration | Registers review, graph, history, and impact-related functions. |
+| `app/api/inngest/functions/review.ts` | Critical | Review worker | Fetches PR data, builds regression context, invokes the model, and updates GitHub/Postgres. |
+| `app/api/inngest/functions/index.ts` | High | Existing async jobs | Repository indexing, full history sync, merged-PR ingestion, polling, and stale-review cleanup. |
+| `app/api/inngest/functions/history.ts` | High | Historical bug-fix event chain | Wires `history.mine.requested` through classification and extraction to graph write. |
+| `module/knowledge-graph/lib/graph-client.ts` | High | Neo4j driver/session access | Lazy singleton driver; validates `NEO4J_URI`, `NEO4J_USER`, `NEO4J_PASSWORD`; always closes sessions. |
+| `module/knowledge-graph/lib/graph-writer.ts` | High | Canonical graph write API | Validates labels, relationship types, and provenance; sets `sourceType`/`confidence`. |
+| `module/knowledge-graph/schema/constraints.ts` | High | Graph schema initialization | Applies idempotent uniqueness constraints on requested node IDs. |
+| `module/knowledge-graph/extraction/ast.ts` | High | AST extraction | Produces symbols, content hashes, calls, reads/writes, routes, imports, and exports. |
+| `module/knowledge-graph/history/commit-miner.ts` | Critical | Git/AST graph ingestion | Creates repository/commit/file/symbol/version graph; inspect before fixing `IMPORTS` or version behavior. |
+| `module/knowledge-graph/history/bug-classifier.ts` | High | LLM bug-fix classifier | Defines `HistoricalPullRequest` and classification contract. |
+| `module/knowledge-graph/history/invariant-extractor.ts` | High | Invariant LLM extraction | Extracts plain-English statement/category/severity/confidence. |
+| `module/knowledge-graph/history/antibody-extractor.ts` | High | Antibody LLM extraction | Extracts problem/root cause/confidence. |
+| `module/knowledge-graph/history/bug-fix-pipeline.ts` | Critical | Historical knowledge persistence | Writes candidate Bug/Invariant/Antibody graph and `repo-antibodies` Pinecone records. |
+| `module/knowledge-graph/impact/blast-radius.ts` | Critical | Bounded graph impact query | Finds callers/reachable symbols, antibody/invariant links, endpoints, scenarios, and data dependencies. |
+| `module/knowledge-graph/impact/historical-impact.ts` | Critical | Historical resurrection query | Finds historical fixes reachable from changed symbols. |
+| `module/regression/judge.ts` | Critical | Regression context orchestration | Merges diff, graph, history, Pinecone, score, and routing tier. |
+| `module/regression/risk-score.ts` | High | Score contract | Contains relationship/distance/history/runtime/change weights and `0.75` threshold. |
+| `module/ai/lib/rag.ts` | High | Existing source-code Pinecone path | Indexes repository files and retrieves semantic context in the default namespace. |
+| `module/ai/lib/generate-json.ts` | High | Shared structured AI call | Uses the existing Gemini provider for history extraction. |
+| `lib/modelscope.ts` | High | Existing review model wrapper | Despite its name, currently uses Google Gemini; the ModelScope env naming is stale. |
+| `module/github/lib/github.ts` | High | Octokit service layer | GitHub repository, PR, diff, contents, check-run, and webhook helpers. |
+| `src/prisma/contract.prisma` | High | PostgreSQL contract | Defines User, Session, Account, Repository, Review, and WebhookDelivery models. |
+| `lib/auth.ts` | High | Better Auth setup | Configures Kysely/Postgres and GitHub OAuth. |
+| `scripts/verify-graph-setup.ts` | Medium | Basic Neo4j fixture | Applies constraints and verifies repository/commit/symbol/version chain. |
+| `scripts/verify-ingestion.ts` | Medium | AST/history fixture | Verifies ingestion basics; cleanup has a known prefix issue. |
+| `scripts/verify-antibodies.ts` | High | Historical knowledge fixture | Uses three fixtures/stub extraction and verifies antibody/invariant/symbol/PR links plus Pinecone persistence. |
+| `scripts/verify-impact.ts` | High | Impact fixture | Verifies bounded multi-hop graph impact and historical match. |
+| `README.md` | High | User documentation | Documents current setup, complete application flow, memory architecture, historical PR handling, sandbox differential execution, and limitations. |
 
 ## 6. Architecture
 
-### Application and authentication
+### Application, authentication, and operational data
 
 ```text
 Browser (React/TanStack Query)
   -> Next.js App Router pages/components
-  -> server actions
+  -> server actions / API routes
   -> Better Auth + Kysely/PostgreSQL
   -> Octokit GitHub API
 ```
 
-- Better Auth is configured in `lib/auth.ts`; GitHub OAuth requests `repo` and `user:email` scope.
-- PostgreSQL models live in `src/prisma/contract.prisma`. Repositories belong to users; reviews belong to repositories; webhook deliveries are deduplicated in PostgreSQL.
-- UI pages include dashboard, repository connection, and review history. They do not currently display graph impact data.
+- Better Auth is configured in `lib/auth.ts`; GitHub OAuth uses `repo` and `user:email` scopes.
+- PostgreSQL owns users, sessions, accounts/tokens, connected repositories, review records, and webhook-delivery deduplication.
+- `module/repository/action/index.ts` validates the authenticated user, creates/reconciles a GitHub webhook, persists the repository, and queues connection/sync events.
+- The UI has dashboard, repository, settings, authentication, review list, and review-detail flows. It does not currently display graph impact data.
 
-### Repository connection and indexing
+### Repository indexing and graph ingestion
 
 ```text
-Connect repository server action
-  -> create/update GitHub webhook
-  -> PostgreSQL Repository
-  -> Inngest repository.connected (Pinecone source-code indexing)
-  -> Inngest repository.sync.requested (Neo4j history mining)
+Connected repository
+  -> repository.connected
+      -> GitHub contents -> Pinecone source-code records
+  -> repository.sync.requested
+      -> GitHub commits oldest-first
+      -> ts-morph AST extraction
+      -> Neo4j Repository/Commit/File/Symbol/SymbolVersion graph
 ```
 
-- `module/repository/action/index.ts` queues `repository.connected` and `repository.sync.requested` for a newly connected repository.
-- `indexRepo` uses GitHub contents walking and Pinecone integrated embeddings via `module/ai/lib/rag.ts`.
-- `syncRepositoryHistory` calls `mineRepositoryHistory()`, which lists Git commits oldest-first, fetches changed file contents at each commit SHA, parses TS/JS, and writes graph data.
+- `module/ai/lib/rag.ts` indexes source files using the existing Pinecone integrated-record API and retrieves source context with repository filtering.
+- `module/knowledge-graph/history/commit-miner.ts` writes Git/AST provenance and uses symbol content hashes for version creation.
+- `pull_request.merged` performs merged-commit file ingestion. It does not itself automatically run the historical bug-fix LLM pipeline.
 
-### GitHub webhook and review flow
+### Historical bug-fix knowledge
+
+```text
+history.mine.requested { pullRequests }
+  -> bug.classify
+      -> antibody.extract.requested
+          -> invariant.extract.requested
+              -> Neo4j graph write + Pinecone repo-antibodies upsert
+```
+
+The graph model is intentionally normalized:
+
+```text
+Antibody -[:PROTECTS]-> Invariant
+Antibody -[:DERIVED_FROM]-> PullRequest -[:FIXED]-> Bug
+Bug -[:VIOLATED]-> Invariant
+Bug -[:REPORTED_IN]-> Issue
+Antibody -[:WATCHES]-> Symbol
+Antibody -[:VERIFIED_BY]-> Test
+PullRequest -[:RESTORED]-> Invariant
+```
+
+Invariant and Antibody are separate nodes. LLM-derived nodes default to `status: candidate`; Invariant also has `validFrom`, `validUntil`, and `supersededBy` for future deprecation/supersession.
+
+### GitHub review and regression judge
 
 ```text
 GitHub pull_request webhook
-  -> /api/webhook/github verifies HMAC + deduplicates delivery in PostgreSQL
-  -> opened/synchronize/reopened/ready_for_review:
-       create GitHub check run + queue pr.review.requested
-  -> closed + merged:
-       queue pull_request.merged
-  -> Inngest generateReview
-       fetch PR diff/title/body
-       build Regression Judge context
-       Google AI review
-       GitHub review comment/check result + PostgreSQL Review record
+  -> HMAC verification + Postgres delivery claim
+  -> opened/synchronize/reopened/ready_for_review
+      -> pr.review.requested
+          -> fetch PR diff/title/body
+          -> bounded Neo4j impact + historical lookup
+          -> Pinecone semantic retrieval
+          -> weighted risk score and routing tier
+          -> Gemini review prompt
+          -> GitHub comment/check-run + Postgres Review
 ```
 
-- `pull_request.merged` invokes incremental merged-commit graph ingestion; it should only parse files changed in that merge commit.
-- A two-minute polling function is a backup for missed review webhook deliveries.
+Impact traversal bounds are currently `CALLS*1..4`, `IMPORTS*1..3`, and `READS|WRITES*1..2`. The judge catches graph/vector lookup failures to preserve standard reviews, but this fallback needs observability.
 
-### Knowledge graph and historical knowledge
+### External data ownership
 
 ```text
-GitHub commits/files
-  -> ts-morph extraction
-  -> Neo4j: Repository -> Commit -> File/SymbolVersion -> Symbol
-  -> Symbol CALLS / READS / WRITES / SERVES (IMPORTS intended)
-
-Historical merged bug-fix PR
-  -> LLM classifier + antibody + invariant extraction
-  -> Neo4j: Antibody -WATCHES-> Symbol
-           Antibody -PROTECTS-> Invariant
-           Antibody -DERIVED_FROM-> PullRequest -FIXED-> Bug -REPORTED_IN-> Issue
-  -> Pinecone repo-antibodies namespace
+PostgreSQL: identity, OAuth, connected repos, review state, webhook dedupe
+Neo4j: repository memory, symbols/versions, graph relationships, invariants/antibodies
+Pinecone: source-code semantic records + repo-antibodies semantic records
+GitHub: source of truth for repository/PR/commit/issue/check-run data
 ```
 
-- Graph writes are tagged with provenance. Commit/File/MODIFIED/TOUCHED writes use `git` at confidence `1`; AST graph data uses `ast` at confidence `1`; historical LLM-derived data uses `llm` with extractor/classifier confidence.
-- Symbol version write logic only creates a new `SymbolVersion` when the new AST content hash differs from the latest version for that symbol.
-
-### Current Regression Judge flow
-
-```text
-PR diff
-  -> changedIdentifiersFromDiff() (best-effort regex)
-  -> Neo4j getBlastRadius() + getHistoricalImpact() [bounded]
-  -> Pinecone retrieveContext()
-  -> computeImpactScore()
-  -> structured JSON context + risk tier
-  -> Google review prompt
-```
-
-The structured payload has changed symbols, callers, reachable symbols, endpoints, scenarios, DB dependencies, antibody/invariant matches, historical bugs/fixes, semantic context, score, and tier. The tier currently does not enqueue any sandbox work.
+No PostgreSQL migration is required for Neo4j graph schema changes. Do not migrate or overwrite existing source-code Pinecone records when adding antibody records; use the dedicated `repo-antibodies` namespace.
 
 ## 7. Important Technical Decisions
 
-1. **Bound graph traversal explicitly.**
-   - `CALLS` is capped at 4, `IMPORTS` at 3, and `READS|WRITES` at 2 in current impact Cypher.
-   - This avoids unbounded variable-length graph scans in a multi-repository graph.
-   - Do not replace these with `*` without bounds. If product requirements need a different depth, make it a controlled, tested input/configuration.
-
-2. **Keep standard review available when graph services fail.**
-   - `buildRegressionJudgeContext()` catches graph and Pinecone failures separately and yields empty context.
-   - This deliberately avoids making GitHub review generation dependent on Neo4j/Pinecone uptime.
-   - Do not casually remove the fallback; improve it with logging/metrics and a visible degraded-state field instead.
-
-3. **Use provenance at every Neo4j write.**
-   - `writeNode`/`writeRelationship` set `sourceType` and `confidence` and enforce a valid confidence range.
-   - Git/AST ingestion must retain `git`/`ast` source with confidence `1.0`; historical LLM inference must retain its confidence.
-   - Avoid direct ad-hoc graph writes that skip these fields.
-
-4. **Use versioned symbols based on AST content hash, not commit count.**
-   - A commit touching a file does not automatically create a new `SymbolVersion`; unchanged symbols should not gain versions.
-   - `PREVIOUS_VERSION` points from the newer version to the earlier version.
-   - Do not simplify this to one version per commit, or the ingestion assertion loses meaning.
-
-5. **Separate PostgreSQL operational records from Neo4j knowledge.**
-   - Postgres owns users, OAuth accounts, repositories, review UI state, and webhook dedupe.
-   - Neo4j owns repository-memory graph entities; no Prisma migration is needed for graph changes.
-   - Pinecone stores semantic source/antibody records, not authoritative graph relations.
-
-6. **The current score is a routing heuristic, not an observed regression.**
-   - A `sandbox-diff-engine` tier means likely high impact/historical resemblance; it must not be described by the model as proof of a bug.
-   - The prompt explicitly says this, and future sandbox results should be a separate evidence channel.
+1. Keep PostgreSQL/Pinecone existing data paths intact. Neo4j is an additional repository-memory layer; do not replace operational Postgres records or the existing source-code Pinecone namespace.
+2. Use bounded graph traversal. Never change the impact queries to unbounded variable-length paths. Current limits are calls 4, imports 3, and data dependencies 2.
+3. Preserve provenance on every graph write. Use `writeNode`/`writeRelationship` and valid `sourceType` values (`ast`, `git`, `github`, `llm`, `runtime`) with confidence `0..1`. Existing direct Cypher in the miner must also set these properties until it is refactored.
+4. Keep `Symbol` separate from `SymbolVersion`. Only content changes create versions; `PREVIOUS_VERSION` points from newer to older.
+5. Keep Invariant separate from Antibody. Multiple bugs/antibodies may reference one invariant; do not embed invariant JSON inside an antibody.
+6. Treat the risk score and `sandbox-diff-engine` tier as routing heuristics, not evidence that a runtime regression exists. The model prompt should not claim more than the graph/diff evidence supports.
+7. Keep standard reviews resilient to optional service failure, but add logs/metrics/degraded-state data rather than silently hiding all failures.
+8. Use `.env.example` for documenting new variables. Never edit or commit real `.env` secrets.
+9. Inngest functions must be registered in `app/api/inngest/route.ts`; adding a function file alone does not make it active.
 
 ## 8. Commands
 
-Run these from the project root (`codepool`):
+Run commands from `C:\Users\adrij\Desktop\codepool`.
 
 ```bash
-# Install dependencies using the declared package manager
+# Install dependencies with the declared package manager
 bun install
 
-# Development server
+# Start the Next.js development server
 bun run dev
 
-# Inngest local development server (downloads/runs inngest-cli through npx)
+# Start the local Inngest development process
 bun run inngest:dev
 
-# Optional public tunnel for GitHub webhooks; writes ignored tunnel.txt
+# Start the optional localtunnel helper for public GitHub webhooks
 bun run dev:tunnel
 
-# Static checks and unit tests
-bun run lint
+# Tests and static checks
 bun test
+bun run lint
 bunx tsc --noEmit --incremental false
 
 # Production build/start
 bun run build
 bun run start
 
-# Prisma ORM contract/migration operations
+# PostgreSQL/Prisma contract and migration commands
 bun run db:generate
 bun run db:init
 bun run db:migrate
 bun run db:status
 bun run db:setup
 
-# Neo4j fixture checks (require Neo4j env vars)
+# Service-backed fixtures; require configured Neo4j and, for antibodies, Pinecone
 bun run verify:graph
 bun run verify:ingestion
 bun run verify:antibodies
 bun run verify:impact
 ```
 
-`bunx tsc --noEmit` without `--incremental false` attempted to write `tsconfig.tsbuildinfo` and failed with `EPERM` in this managed workspace. Use the documented non-incremental form here; `*.tsbuildinfo` is ignored.
+There is no project-specific deployment command in `package.json`; deployment is not documented or verified in this repository. `bunx tsc --noEmit` with incremental mode attempted to write `tsconfig.tsbuildinfo` and previously hit managed-workspace `EPERM`; use `--incremental false` for a clean validation command here.
 
 ## 9. Environment Variables
 
-Configure these in local `.env` (copy `.env.example`; do not commit it):
+Configure these in local `.env`, usually by copying `.env.example`. Real values are intentionally omitted here and must never be committed.
 
 ```text
 DATABASE_URL=<required PostgreSQL connection string>
 BETTER_AUTH_SECRET=<required>
 BETTER_AUTH_URL=<required application URL>
-NEXT_PUBLIC_BETTER_AUTH_URL=<optional browser override>
+NEXT_PUBLIC_BETTER_AUTH_URL=<optional browser URL override>
 NEXT_PUBLIC_BASE_URL=<required public URL for production GitHub webhooks>
 
 GITHUB_CLIENT_ID=<required for GitHub OAuth>
 GITHUB_CLIENT_SECRET=<required for GitHub OAuth>
-GITHUB_WEBHOOK_SECRET=<required to verify/create webhooks>
+GITHUB_WEBHOOK_SECRET=<required for webhook verification/creation>
 
-GOOGLE_GENERATIVE_AI_API_KEY=<required for Google AI review/classification/extraction>
-PINECONE_DB_API_KEY=<required for Pinecone; PINECONE_API_KEY is also accepted by code>
-PINECONE_INDEX=<required for Pinecone>
+GOOGLE_GENERATIVE_AI_API_KEY=<required for Gemini review/classification/extraction>
+PINECONE_DB_API_KEY=<required; PINECONE_API_KEY is also accepted by code>
+PINECONE_INDEX=<required Pinecone index name>
 PINECONE_TEXT_FIELD=<optional; defaults to text>
 
-NEO4J_URI=<required for graph operations>
-NEO4J_USER=<required for graph operations>
-NEO4J_PASSWORD=<required for graph operations>
+NEO4J_URI=<required for Neo4j operations>
+NEO4J_USER=<required for Neo4j operations>
+NEO4J_PASSWORD=<required for Neo4j operations>
 ```
 
-Notes:
-
-- `.env.example` also lists `MODELSCOPE_API_KEY`, but current `lib/modelscope.ts` actually uses the Google AI SDK/model and `GOOGLE_GENERATIVE_AI_API_KEY`; the ModelScope naming is stale.
-- `NEXT_PUBLIC_BASE_URL` must be public/non-local for `createWebhook()` to install a GitHub webhook. Local development can use `bun run dev:tunnel` and update the base URL.
+`.env.example` also contains `MODELSCOPE_API_KEY` because of older project naming, but current review/extraction code uses the Google AI SDK and `GOOGLE_GENERATIVE_AI_API_KEY`. `NEXT_PUBLIC_BASE_URL` must be public/non-local for production webhook installation; local development can use the tunnel helper.
 
 ## 10. Testing Status
 
-### Run in this session
+Verified during this handoff audit:
 
 | Command | Result |
 | --- | --- |
-| `bun test` | Passed: 5 tests in 2 files, 0 failures. Covers review check lifecycle and review content rendering. |
-| `bun run lint` | Passed with no reported errors/warnings after the final cleanup. |
+| `bun test` | Passed: 5 tests in 2 files, 0 failures. |
+| `bun run lint` | Completed with no errors; an existing unused `sourceFile` warning in `module/knowledge-graph/extraction/ast.ts` may appear depending on the checked revision. |
 | `bunx tsc --noEmit --incremental false` | Passed. |
-| `git diff --check` | Passed; only Git line-ending warnings were printed. |
 
-### Not run
+Not verified in this environment:
 
-- `bun run build` was not run.
-- `bun run verify:graph`, `verify:ingestion`, `verify:antibodies`, and `verify:impact` were not run because no verified Neo4j configuration was available in this environment.
-- No live GitHub OAuth/webhook, Inngest, Google AI, Pinecone, PostgreSQL migration, or Neo4j query execution was performed.
-- No automated test currently exercises the new impact modules or the changed review prompt integration.
+- `bun run build` was not run in this audit.
+- `bun run verify:graph`, `verify:ingestion`, `verify:antibodies`, and `verify:impact` were not run successfully against live services because verified Neo4j/Pinecone configuration was unavailable.
+- No live Neo4j Cypher, Pinecone upsert/search, Gemini call, GitHub OAuth/webhook, Inngest delivery, or PostgreSQL migration was exercised in this audit.
+- No focused unit tests cover impact queries, judge diff parsing, risk scoring, historical pipeline orchestration, or graph/Pinecone failure fallback.
 
-### Errors encountered
+Previously observed implementation errors:
 
-- `bunx tsc --noEmit` initially failed because TypeScript attempted to write `tsconfig.tsbuildinfo` and received `EPERM`. Retrying with `--incremental false` succeeded.
-- During inspection, PowerShell `Get-Content` did not resolve the literal `[...all]` auth route because brackets are wildcard syntax. This did not affect application execution and no auth route was modified.
+- `bun add neo4j-driver` initially hit sandbox temp-directory `EPERM`; the dependency was subsequently installed with approved escalation and is present in `package.json`/`bun.lock`.
+- Running `bun run verify:graph`/`bun run verify:antibodies` without Neo4j variables fails with the expected `Neo4j is not configured. Set NEO4J_URI.` error. This is configuration failure, not proof that live Cypher passes.
 
 ## 11. Git / Change Status
 
 - Branch: `main`.
-- Most recent commits at inspection:
+- `HEAD`: `f617aaa feat: Implement regression judge context and impact analysis`.
+- `origin/main` and `origin/HEAD` pointed to the same commit during inspection.
+- Before this documentation update, `git status --short` was clean and there were no uncommitted application changes.
+- This documentation task intentionally modifies `README.md` and `HANDOFF.md`; do not discard either file. No commit was created.
+- Recent relevant commits:
 
 ```text
+f617aaa feat: Implement regression judge context and impact analysis
 284aa3e feat: implement historical bug fix mining and classification functions, add antibody and invariant extraction, and create verification script
 1b17b7b feat: implement repository history synchronization and graph ingestion functions, enhance GitHub webhook handling, and add ingestion verification script
 410d855 feat: integrate Neo4j support with graph client and writer, add schema constraints, and implement verification script
 ```
 
-- `HANDOFF.md` is newly created by this handoff task and is also uncommitted.
-- Existing uncommitted modified files:
-
-```text
-app/api/inngest/functions/review.ts
-module/knowledge-graph/extraction/ast.ts
-module/knowledge-graph/history/commit-miner.ts
-module/knowledge-graph/lib/graph-writer.ts
-package.json
-```
-
-- Existing untracked files/directories:
-
-```text
-module/knowledge-graph/impact/blast-radius.ts
-module/knowledge-graph/impact/historical-impact.ts
-module/regression/judge.ts
-module/regression/risk-score.ts
-scripts/verify-impact.ts
-HANDOFF.md
-```
-
-These changes are intentional and are the current impact-analysis feature. Do not discard/reset them. No commits were created in this session.
-
-`git diff --stat` does not include untracked files; it reported 36 insertions and 20 deletions in the five tracked modified files. The new untracked files contain the majority of the feature.
+After this file is written, run `git status --short` and verify that only the intended `README.md` and `HANDOFF.md` changes are present. Do not use destructive reset/checkout commands to clean the tree.
 
 ## 12. Problems / Risks
 
-- **Primary functional risk:** `IMPORTS` graph relationships are currently unreliable for the reasons in Known Bugs. The new impact code does safely bound them, but likely gets no useful import paths until ingestion is fixed and existing repositories are reindexed.
-- **Graph data freshness:** an open/synchronized PR is analyzed against the repository's already-ingested graph. The PR head itself is not AST-ingested before review; changed IDs are guessed from text diff. This can make graph matching stale or empty.
-- **Historical data availability:** historical antibodies only exist if `history.mine.requested` has been supplied with `HistoricalPullRequest[]` and the asynchronous classifier/extractors succeeded. Nothing automatically mines all historical PRs on repository connection.
-- **Operational cost:** full commit history mining has no repository-size/rate-limit strategy. Inngest retries could repeat expensive GitHub and Neo4j work.
-- **Endpoint/scenario limitations:** endpoints are only inferred for exported HTTP-method-named functions in conventional Next routes. Scenarios are not populated by current normal ingestion; the impact script creates them only as a fixture.
-- **Security/authorization:** OAuth tokens are stored in Postgres account rows and used by async jobs. Preserve user/repository ownership checks when adding APIs or jobs.
-- **Prompt size:** the full `RegressionJudgeContext` JSON plus raw diff is sent to the model. Large graph/semantic result sets can raise cost/token risk; add caps/summaries if production data grows.
-- **Documentation gap:** README is generic and not reliable for setup. This handoff is currently the most complete operational documentation.
+- The most important functional risk is broken/incomplete `IMPORTS` materialization, which can make import-based impact reachability empty or incorrect until fixed and reindexed.
+- Open-PR analysis uses an already-ingested graph and a regex-derived changed-symbol list. The PR head is not AST-ingested before review, so stale or empty graph context is possible.
+- Historical antibody data is not automatically mined for every repository connection; it requires the history event payload and successful asynchronous LLM/Pinecone/Neo4j work.
+- Full history mining is API-expensive and retrying Inngest jobs can repeat GitHub/Neo4j work without checkpoints.
+- Endpoint inference is limited to current AST route heuristics, and normal ingestion does not yet populate runtime Scenarios; fixtures create scenarios only for validation.
+- Prompt size can grow because structured judge context and raw diffs are both sent to Gemini; add caps/summarization before production scale.
+- Cross-store graph/vector writes lack atomicity and reconciliation.
+- GitHub OAuth access tokens are read from Postgres account rows by async jobs. Preserve repository ownership checks and do not expose token values in logs or docs.
+- Existing `.env` contains private credentials in the local workspace and is gitignored. Never print, copy, or commit them.
 
 ## 13. Next Steps
 
-1. Read this file and inspect the uncommitted impact files before changing anything.
-2. Fix `IMPORTS` ingestion in `module/knowledge-graph/history/commit-miner.ts`:
-   - Move import edge creation after Symbol nodes are written.
-   - Resolve paths relative to each importing file, normalize `.`/`..`, and support configured TS/JS extensions/index files.
-   - Remove the broad swallowed error; log/return a scoped failure or test it explicitly.
-3. Rebuild/reingest a small fixture repository after that fix, then run `bun run verify:ingestion` and `bun run verify:impact` with Neo4j configured. Correct fixture cleanup in `verify-ingestion.ts` while there.
-4. Validate the exact Neo4j Cypher syntax and query plans in `blast-radius.ts` and `historical-impact.ts`; add indexes/constraints where query profiling shows need.
-5. Replace or augment regex diff symbol discovery with AST extraction of changed PR-head files and stable symbol IDs. Ensure edits inside an existing function are mapped, not just newly declared functions.
-6. Add unit tests for risk scoring, changed-symbol extraction, bounded traversal construction, and regression judge fallback behavior. Keep `bun test`, lint, and non-incremental typecheck green.
-7. Add explicit degraded-context observability and decide how to persist/expose `impactScore`/tier in the review record/UI.
-8. Implement Prompt 5 Sandbox Diff Engine, using `sandbox-diff-engine` tier as its input; do not equate the tier with a confirmed regression.
-9. Update README with actual local setup, service dependencies, Inngest/webhook workflow, and verification commands.
-10. Once validated, review the diff carefully and commit the intended impact work and this handoff in a focused commit.
+1. Read this file and inspect `git status --short`; preserve the intentional README and handoff changes.
+2. Fix `IMPORTS` in `module/knowledge-graph/history/commit-miner.ts`: run after symbol upserts, resolve nested relative paths from the importer directory, support relevant TS/JS extension/index variants, and stop swallowing all errors.
+3. Add or update a small fixture proving import reachability, then run `bun run verify:ingestion` with Neo4j.
+4. Configure isolated Neo4j/Pinecone test services and run `bun run verify:graph`, `bun run verify:antibodies`, and `bun run verify:impact`; repair Cypher/type/cleanup issues revealed by real runs.
+5. Add unit tests for `changedIdentifiersFromDiff()`, `computeImpactScore()`, bounded traversal assumptions, and judge service-failure fallback.
+6. Replace/augment regex changed-symbol detection with AST extraction of PR-head changed files, including body-only edits, methods, renames, and deletions.
+7. Add explicit degraded-context logging/metrics and decide whether score/tier should be persisted in the PostgreSQL `Review` record or exposed in the UI.
+8. Add reconciliation or retry strategy for Neo4j/Pinecone antibody writes.
+9. Harden and complete the Sandbox Diff Engine/provider rollout, then connect the `sandbox-diff-engine` tier without treating the tier as confirmed runtime evidence.
+10. Keep `README.md` synchronized with setup, service dependencies, graph model, event flow, and verification commands.
+11. Re-run `bun test`, `bun run lint`, `bunx tsc --noEmit --incremental false`, and relevant service fixtures; then update this handoff and review the diff before committing.
 
 ## NEXT ACTION
 
-Start with `module/knowledge-graph/history/commit-miner.ts`: move and rewrite the `IMPORTS` relationship query so it runs after symbol upserts and resolves nested relative imports correctly. Then configure Neo4j and run `bun run verify:ingestion` followed by `bun run verify:impact`; use those results to validate or repair the bounded impact Cypher before extending the judge further.
+Open `module/knowledge-graph/history/commit-miner.ts` and fix the `IMPORTS` write ordering and nested relative-module resolution first. Then configure a disposable Neo4j instance and run `bun run verify:ingestion` and `bun run verify:impact` before changing the regression judge further.
